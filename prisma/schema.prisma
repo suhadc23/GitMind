@@ -1,0 +1,124 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String              @id @default(cuid())
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  clerkId            String              @unique
+  imageUrl           String?
+  firstName          String?
+  lastName           String?
+  emailAddress       String              @unique
+  credits            Int                 @default(150)
+  questions          Question[]
+  stripeTransactions StripeTransaction[]
+  userToProjects     UserToProject[]
+}
+
+model Project {
+  id                   String                @id @default(cuid())
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  name                 String
+  githubUrl            String
+  deletedAt            DateTime?
+  commits              Commit[]
+  meetings             Meeting[]
+  questions            Question[]
+  sourceCodeEmbeddings SourceCodeEmbedding[]
+  userToProjects       UserToProject[]
+}
+
+model UserToProject {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, projectId])
+}
+
+model SourceCodeEmbedding {
+  id         String   @id @default(cuid())
+  sourceCode String   @db.Text
+  fileName   String
+  summary    String   @db.Text
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Meeting {
+  id         String        @id @default(cuid())
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  name       String
+  meetingUrl String
+  projectId  String
+  status     MeetingStatus @default(PROCESSING)
+  issues     Issue[]
+  project    Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+model Issue {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  start     String
+  end       String
+  gist      String   @db.Text
+  headline  String
+  summary   String   @db.Text
+  meetingId String
+  meeting   Meeting  @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+}
+
+model StripeTransaction {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  userId    String
+  credits   Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Question {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  question        String   @db.Text
+  answer          String   @db.Text
+  filesReferences Json?
+  projectId       String
+  userId          String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Commit {
+  id                 String   @id @default(cuid())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  projectId          String
+  commitMessage      String   @db.Text
+  commitHash         String
+  commitAuthorName   String
+  commitAuthorAvatar String
+  commitDate         DateTime
+  summary            String   @db.Text
+  project            Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+}
+
+enum MeetingStatus {
+  PROCESSING
+  COMPLETED
+}
