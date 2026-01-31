@@ -103,7 +103,7 @@ export default async function SettingsPage() {
       {/* Coming Soon Notice */}
       <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-6">
         <p className="text-amber-800 font-medium">
-          ⚠️ Additional settings panels coming soon! For now, manage your account through Clerk's user profile.
+          Additional settings panels coming soon! For now, manage your account through the Clerk user profile.
         </p>
       </div>
     </div>
