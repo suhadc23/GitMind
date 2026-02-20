@@ -1,14 +1,16 @@
-import { SignIn } from '@clerk/nextjs'
+'use client'
+
+import { SignUp } from '@clerk/nextjs'
 import Link from 'next/link'
 import { Code2, ArrowLeft } from 'lucide-react'
 
-export default function SignInPage() {
+export default function SignUpPage() {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-teal-50 via-white to-emerald-50 flex items-center justify-center p-4">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-emerald-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-teal-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style={{ animationDelay: '2s' }}></div>
+        <div className="absolute -top-40 -right-40 w-80 h-80 bg-teal-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float"></div>
+        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-emerald-400 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-float" style={{ animationDelay: '2s' }}></div>
       </div>
 
       <div className="relative w-full max-w-6xl mx-auto grid md:grid-cols-2 gap-8 items-center">
@@ -29,14 +31,14 @@ export default function SignInPage() {
           </div>
 
           <h1 className="text-4xl font-bold text-gray-900 leading-tight">
-            Welcome Back to
+            Start Your Journey to
             <span className="block bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-              AI-Powered Insights
+              Smarter Code Understanding
             </span>
           </h1>
 
           <p className="text-lg text-gray-600">
-            Sign in to continue exploring your repositories with advanced AI analysis and natural language queries.
+            Join thousands of developers who are already using AI to understand their codebases faster and more efficiently.
           </p>
 
           <div className="space-y-4 pt-6">
@@ -47,8 +49,8 @@ export default function SignInPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">Natural Language Search</h3>
-                <p className="text-gray-600 text-sm">Ask questions about your code in plain English</p>
+                <h3 className="font-semibold text-gray-900">Free to Start</h3>
+                <p className="text-gray-600 text-sm">150 AI credits per month on the free plan</p>
               </div>
             </div>
 
@@ -59,8 +61,8 @@ export default function SignInPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">Deep Code Analysis</h3>
-                <p className="text-gray-600 text-sm">Understand dependencies and patterns instantly</p>
+                <h3 className="font-semibold text-gray-900">No Credit Card Required</h3>
+                <p className="text-gray-600 text-sm">Start exploring immediately, no payment needed</p>
               </div>
             </div>
 
@@ -71,14 +73,20 @@ export default function SignInPage() {
                 </svg>
               </div>
               <div>
-                <h3 className="font-semibold text-gray-900">Team Collaboration</h3>
-                <p className="text-gray-600 text-sm">Share insights across your entire team</p>
+                <h3 className="font-semibold text-gray-900">Instant Setup</h3>
+                <p className="text-gray-600 text-sm">Connect your GitHub repo and start asking questions</p>
               </div>
             </div>
           </div>
+
+          <div className="pt-6 border-t border-gray-200">
+            <p className="text-sm text-gray-500">
+              Trusted by developers at companies like Google, Microsoft, and Amazon
+            </p>
+          </div>
         </div>
 
-        {/* Right side - Sign In Form */}
+        {/* Right side - Sign Up Form */}
         <div className="flex flex-col items-center">
           <div className="w-full max-w-md">
             {/* Mobile back button */}
@@ -99,11 +107,11 @@ export default function SignInPage() {
 
             <div className="bg-white rounded-2xl shadow-2xl p-8 border border-gray-100">
               <div className="mb-6 text-center md:text-left">
-                <h2 className="text-2xl font-bold text-gray-900 mb-2">Sign in to your account</h2>
-                <p className="text-gray-600">Continue your AI-powered development journey</p>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Create your account</h2>
+                <p className="text-gray-600">Start understanding your code with AI today</p>
               </div>
 
-              <SignIn
+              <SignUp
                 appearance={{
                   elements: {
                     rootBox: 'w-full',
@@ -115,13 +123,15 @@ export default function SignInPage() {
                     footerActionLink: 'text-emerald-600 hover:text-emerald-700',
                   },
                 }}
+                redirectUrl="/sync-user"
+                signInUrl="/sign-in"
               />
             </div>
 
             <p className="text-center mt-6 text-gray-600">
-              Do not have an account?{' '}
-              <Link href="/sign-up" className="text-emerald-600 hover:text-emerald-700 font-semibold">
-                Sign up for free
+              Already have an account?{' '}
+              <Link href="/sign-in" className="text-emerald-600 hover:text-emerald-700 font-semibold">
+                Sign in
               </Link>
             </p>
           </div>

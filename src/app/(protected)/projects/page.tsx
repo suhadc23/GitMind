@@ -12,7 +12,8 @@ import {
   ExternalLink,
   Loader2,
   Calendar,
-  MessageSquare
+  MessageSquare,
+  Trash2
 } from 'lucide-react'
 
 interface RepoInfo {
@@ -58,6 +59,12 @@ export default function ProjectsPage() {
 
     fetchProjects()
   }, [])
+
+  // Handle project deletion
+  const handleDeleteProject = async (projectId: string) => {
+    // Optimistically remove from UI
+    setProjects(prev => prev.filter(p => p.id !== projectId))
+  }
 
   // Loading state
   if (isLoading) {
@@ -131,7 +138,11 @@ export default function ProjectsPage() {
       ) : (
         <div className="grid gap-6 md:grid-cols-2">
           {projects.map((project) => (
-            <ProjectCard key={project.id} project={project} />
+            <ProjectCard
+              key={project.id}
+              project={project}
+              onDelete={handleDeleteProject}
+            />
           ))}
         </div>
       )}
@@ -139,7 +150,15 @@ export default function ProjectsPage() {
   )
 }
 
-function ProjectCard({ project }: { project: Project }) {
+function ProjectCard({
+  project,
+  onDelete
+}: {
+  project: Project
+  onDelete: (projectId: string) => void
+}) {
+  const [isDeleting, setIsDeleting] = useState(false)
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
@@ -148,9 +167,53 @@ function ProjectCard({ project }: { project: Project }) {
     })
   }
 
+  const handleDelete = async () => {
+    // Confirm deletion
+    const confirmDelete = window.confirm(
+      `Are you sure you want to delete "${project.name}"?\n\nThis will permanently remove:\n- The project\n- All indexed code\n- All questions and answers\n\nThis action cannot be undone.`
+    )
+
+    if (!confirmDelete) return
+
+    setIsDeleting(true)
+
+    try {
+      const response = await fetch(`/api/projects/${project.id}`, {
+        method: 'DELETE',
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to delete project')
+      }
+
+      // Update parent state to remove project from UI
+      onDelete(project.id)
+    } catch (error) {
+      console.error('Error deleting project:', error)
+      alert(error instanceof Error ? error.message : 'Failed to delete project')
+      setIsDeleting(false)
+    }
+  }
+
   return (
-    <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-shadow">
-      <div className="flex items-start gap-4">
+    <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-shadow relative">
+      {/* Delete button in top-right corner */}
+      <button
+        onClick={handleDelete}
+        disabled={isDeleting}
+        className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        title="Delete project"
+      >
+        {isDeleting ? (
+          <Loader2 className="h-5 w-5 animate-spin" />
+        ) : (
+          <Trash2 className="h-5 w-5" />
+        )}
+      </button>
+
+      <div className="flex items-start gap-4 pr-10">
         {project.repoInfo?.avatar ? (
           <img
             src={project.repoInfo.avatar}

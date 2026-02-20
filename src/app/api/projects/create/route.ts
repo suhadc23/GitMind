@@ -6,7 +6,7 @@ import { db } from '@/server/db'
 async function getOrCreateUser(clerkId: string) {
   // Try to find existing user
   let user = await db.user.findUnique({
-    where: { clerkId },
+    where: { id: clerkId },
   })
 
   // If user doesn't exist, create them from Clerk data
@@ -16,7 +16,7 @@ async function getOrCreateUser(clerkId: string) {
 
     user = await db.user.create({
       data: {
-        clerkId: clerkUser.id,
+        id: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
@@ -52,19 +52,35 @@ function parseGitHubUrl(url: string): { owner: string; repo: string } | null {
 
 // Fetch repository info from GitHub API
 async function fetchGitHubRepo(owner: string, repo: string) {
+  const headers: Record<string, string> = {
+    'Accept': 'application/vnd.github.v3+json',
+    'User-Agent': 'GitMind-App',
+  }
+
+  // Add GitHub token if available for higher rate limits
+  if (process.env.GITHUB_TOKEN) {
+    headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`
+  }
+
   const response = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
-    headers: {
-      'Accept': 'application/vnd.github.v3+json',
-      'User-Agent': 'GitMind-App',
-    },
+    headers,
     next: { revalidate: 0 },
   })
 
   if (!response.ok) {
+    const errorData = await response.text()
+    console.error(`GitHub API Error (${response.status}):`, errorData)
+
     if (response.status === 404) {
       throw new Error('Repository not found. Make sure it exists and is public.')
     }
-    throw new Error('Failed to fetch repository information')
+    if (response.status === 403) {
+      throw new Error('GitHub API rate limit exceeded. Please add a GITHUB_TOKEN to your .env file or try again later.')
+    }
+    if (response.status === 401) {
+      throw new Error('GitHub authentication failed. Please check your GITHUB_TOKEN.')
+    }
+    throw new Error(`Failed to fetch repository information (Status: ${response.status})`)
   }
 
   return response.json()

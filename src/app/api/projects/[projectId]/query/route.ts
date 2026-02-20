@@ -1,13 +1,12 @@
 import { auth, currentUser } from '@clerk/nextjs/server'
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/server/db'
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY
+import { askAI } from '@/lib/ai'
 
 // Get or create user in database
 async function getOrCreateUser(clerkId: string) {
   let user = await db.user.findUnique({
-    where: { clerkId },
+    where: { id: clerkId },
   })
 
   if (!user) {
@@ -16,7 +15,7 @@ async function getOrCreateUser(clerkId: string) {
 
     user = await db.user.create({
       data: {
-        clerkId: clerkUser.id,
+        id: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
@@ -55,6 +54,38 @@ async function fetchRepoReadme(githubUrl: string): Promise<string | null> {
   }
 }
 
+// Fetch indexed code summaries from database
+async function fetchIndexedCode(projectId: string): Promise<string | null> {
+  try {
+    const embeddings = await db.sourceCodeEmbedding.findMany({
+      where: { projectId },
+      select: {
+        fileName: true,
+        summary: true,
+        sourceCode: true,
+      },
+      take: 15, // Limit to 15 most relevant files
+      orderBy: { createdAt: 'desc' },
+    })
+
+    if (embeddings.length === 0) return null
+
+    // Build context from code summaries
+    let context = '=== INDEXED CODE FILES ===\n\n'
+
+    for (const file of embeddings) {
+      context += `\n📄 File: ${file.fileName}\n`
+      context += `📝 Summary: ${file.summary}\n`
+      context += `💻 Code Preview:\n\`\`\`\n${file.sourceCode.slice(0, 500)}...\n\`\`\`\n\n`
+    }
+
+    return context
+  } catch (error) {
+    console.error('Error fetching indexed code:', error)
+    return null
+  }
+}
+
 // Fetch repo info from GitHub
 async function fetchRepoInfo(githubUrl: string) {
   try {
@@ -76,55 +107,7 @@ async function fetchRepoInfo(githubUrl: string) {
   }
 }
 
-// Call Gemini API
-async function askGemini(question: string, context: string): Promise<string> {
-  if (!GEMINI_API_KEY) {
-    throw new Error('Gemini API key not configured')
-  }
-
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [
-              {
-                text: `You are an AI assistant helping developers understand GitHub repositories.
-
-Based on the following repository information, answer the user's question clearly and concisely.
-
-REPOSITORY CONTEXT:
-${context}
-
-USER QUESTION: ${question}
-
-Provide a helpful, accurate answer. If you cannot answer based on the provided context, say so politely and suggest what additional information might help.`,
-              },
-            ],
-          },
-        ],
-        generationConfig: {
-          temperature: 0.7,
-          maxOutputTokens: 1024,
-        },
-      }),
-    }
-  )
-
-  if (!response.ok) {
-    const error = await response.text()
-    console.error('Gemini API error:', error)
-    throw new Error('Failed to get AI response')
-  }
-
-  const data = await response.json()
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || 'No response generated'
-}
+// askGemini function now imported from @/lib/gemini
 
 export async function POST(
   req: NextRequest,
@@ -173,9 +156,10 @@ export async function POST(
       return NextResponse.json({ error: 'Project not found' }, { status: 404 })
     }
 
-    // Fetch repo context
-    const [repoInfo, readme] = await Promise.all([
+    // Fetch repo context - prioritize indexed code over README
+    const [repoInfo, indexedCode, readme] = await Promise.all([
       fetchRepoInfo(project.githubUrl),
+      fetchIndexedCode(projectId),
       fetchRepoReadme(project.githubUrl),
     ])
 
@@ -190,14 +174,21 @@ export async function POST(
       context += `Topics: ${repoInfo.topics?.join(', ') || 'None'}\n`
     }
 
-    if (readme) {
+    // Use indexed code if available, otherwise fall back to README
+    if (indexedCode) {
+      context += `\n${indexedCode}\n`
+      console.log('✅ Using indexed code for AI context')
+    } else if (readme) {
       // Truncate README if too long
       const truncatedReadme = readme.length > 8000 ? readme.substring(0, 8000) + '...' : readme
       context += `\nREADME:\n${truncatedReadme}\n`
+      console.log('ℹ️ Using README for AI context (no indexed code available)')
+    } else {
+      console.log('⚠️ No code context available')
     }
 
-    // Call Gemini
-    const answer = await askGemini(question, context)
+    // Call AI (Groq or Gemini)
+    const answer = await askAI(question, context)
 
     // Save question to database
     const savedQuestion = await db.question.create({

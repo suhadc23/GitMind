@@ -18,7 +18,10 @@ import {
   User,
   Bot,
   Coins,
-  MessageSquare
+  MessageSquare,
+  Database,
+  CheckCircle2,
+  AlertCircle
 } from 'lucide-react'
 
 interface RepoInfo {
@@ -63,6 +66,9 @@ export default function ProjectDetailPage() {
   const [isAsking, setIsAsking] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [credits, setCredits] = useState<number | null>(null)
+  const [isIndexed, setIsIndexed] = useState<boolean>(false)
+  const [isIndexing, setIsIndexing] = useState(false)
+  const [indexingError, setIndexingError] = useState<string | null>(null)
 
   // Fetch project details
   useEffect(() => {
@@ -99,9 +105,52 @@ export default function ProjectDetailPage() {
       }
     }
 
+    async function checkIndexStatus() {
+      try {
+        const response = await fetch(`/api/projects/${projectId}/index`)
+        const data = await response.json()
+
+        if (response.ok) {
+          setIsIndexed(data.indexed)
+        }
+      } catch {
+        // Ignore errors for index status
+      }
+    }
+
     fetchProject()
     fetchQuestions()
+    checkIndexStatus()
   }, [projectId])
+
+  const handleIndexRepo = async () => {
+    if (isIndexing) return
+
+    setIsIndexing(true)
+    setIndexingError(null)
+
+    try {
+      const response = await fetch(`/api/projects/${projectId}/index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+
+      const data = await response.json()
+
+      if (!response.ok) {
+        throw new Error(data.message || data.error || 'Failed to index repository')
+      }
+
+      setIsIndexed(true)
+      alert(`✅ Repository indexed successfully!\n\n📊 Indexed ${data.indexed} files\n💰 Credits used: ${data.creditsUsed}\n💳 Remaining: ${data.remainingCredits} credits`)
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Something went wrong'
+      setIndexingError(errorMessage)
+      alert(`❌ Indexing failed:\n\n${errorMessage}`)
+    } finally {
+      setIsIndexing(false)
+    }
+  }
 
   const handleAskQuestion = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -242,6 +291,73 @@ export default function ProjectDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Repository Indexing Section */}
+      <div className={`rounded-xl border-2 p-6 ${
+        isIndexed
+          ? 'bg-emerald-50 border-emerald-200'
+          : 'bg-blue-50 border-blue-200'
+      }`}>
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-start gap-3 flex-1">
+            {isIndexed ? (
+              <CheckCircle2 className="h-6 w-6 text-emerald-600 flex-shrink-0 mt-0.5" />
+            ) : (
+              <Database className="h-6 w-6 text-blue-600 flex-shrink-0 mt-0.5" />
+            )}
+            <div className="flex-1">
+              <h3 className={`font-semibold text-lg ${
+                isIndexed ? 'text-emerald-900' : 'text-blue-900'
+              }`}>
+                {isIndexed ? 'Repository Indexed' : 'Index Repository for Better AI Answers'}
+              </h3>
+              <p className={`text-sm mt-1 ${
+                isIndexed ? 'text-emerald-700' : 'text-blue-700'
+              }`}>
+                {isIndexed
+                  ? 'This repository has been indexed. AI can now answer questions using the actual code files.'
+                  : 'Index this repository to enable AI to answer questions using the actual code instead of just the README.'
+                }
+              </p>
+              {!isIndexed && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-xs text-blue-600">
+                    💡 <strong>Benefits:</strong> More accurate answers, code-specific insights, better understanding of implementation details
+                  </p>
+                  <p className="text-xs text-blue-600">
+                    💰 <strong>Cost:</strong> 1 credit per 10 files (max 20 files for demo)
+                  </p>
+                </div>
+              )}
+              {indexingError && (
+                <div className="mt-3 flex items-start gap-2 text-sm text-red-600">
+                  <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                  <p>{indexingError}</p>
+                </div>
+              )}
+            </div>
+          </div>
+          {!isIndexed && (
+            <Button
+              onClick={handleIndexRepo}
+              disabled={isIndexing}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isIndexing ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Indexing...
+                </>
+              ) : (
+                <>
+                  <Database className="h-4 w-4 mr-2" />
+                  Index Repository
+                </>
+              )}
+            </Button>
+          )}
+        </div>
+      </div>
 
       {/* AI Query Section */}
       <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">

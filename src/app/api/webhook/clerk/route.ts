@@ -56,7 +56,7 @@ export async function POST(req: Request) {
     try {
       await db.user.create({
         data: {
-          clerkId: id,
+          id: id,
           emailAddress: email,
           firstName: first_name || null,
           lastName: last_name || null,
@@ -83,7 +83,7 @@ export async function POST(req: Request) {
 
     try {
       await db.user.update({
-        where: { clerkId: id },
+        where: { id: id },
         data: {
           emailAddress: email,
           firstName: first_name || null,
@@ -104,7 +104,7 @@ export async function POST(req: Request) {
 
     try {
       await db.user.delete({
-        where: { clerkId: id as string },
+        where: { id: id as string },
       })
 
       return new Response('User deleted successfully', { status: 200 })

@@ -5,7 +5,7 @@ import { db } from '@/server/db'
 // Get or create user in database
 async function getOrCreateUser(clerkId: string) {
   let user = await db.user.findUnique({
-    where: { clerkId },
+    where: { id: clerkId },
   })
 
   if (!user) {
@@ -14,7 +14,7 @@ async function getOrCreateUser(clerkId: string) {
 
     user = await db.user.create({
       data: {
-        clerkId: clerkUser.id,
+        id: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,

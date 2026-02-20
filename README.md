@@ -41,8 +41,8 @@ GitMind features a completely unique UI design compared to the original RepoMind
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Node.js 18+ 
-- PostgreSQL database
+- Node.js 18+
+- Docker and Docker Compose (recommended) OR PostgreSQL 14+
 - npm or yarn
 
 ### Installation
@@ -50,7 +50,7 @@ GitMind features a completely unique UI design compared to the original RepoMind
 1. Install dependencies:
 ```bash
 cd ~/Desktop/GitMind
-npm install
+npm install  # Automatically runs 'prisma generate' via postinstall
 ```
 
 2. Set up environment variables:
@@ -64,17 +64,78 @@ Edit `.env` and add your credentials:
 - Gemini API key (for AI features)
 - AssemblyAI key (for transcription)
 
-3. Set up database:
+3. Start the database:
+
+**Option A: Using startup script (Recommended - from reference repo)**
+```bash
+./start-database.sh
+```
+This script will automatically check for Docker, create the container, and start PostgreSQL.
+
+**Option B: Using docker-compose manually**
+```bash
+docker compose up -d
+```
+
+**Option C: Using local PostgreSQL**
+```bash
+# Make sure PostgreSQL is running on port 5432
+# Create database: CREATE DATABASE gitmind;
+```
+
+4. Set up database schema:
 ```bash
 npm run db:push
 ```
 
-4. Start development server:
+5. Start development server:
 ```bash
 npm run dev
 ```
 
-5. Open [http://localhost:3000](http://localhost:3000) in your browser
+6. Open [http://localhost:3000](http://localhost:3000) in your browser
+
+### Troubleshooting
+
+**Error: "@prisma/client did not initialize yet"**
+
+If you see this error, run:
+```bash
+npx prisma generate
+npm run dev
+```
+
+This error occurs when Prisma Client hasn't been generated. The postinstall script should handle this automatically, but you can manually regenerate if needed.
+
+**Error: "Can't reach database server at localhost:5432"**
+
+This means PostgreSQL is not running. To fix:
+
+Using Docker:
+```bash
+docker-compose up -d
+npm run db:push
+npm run dev
+```
+
+Using local PostgreSQL:
+```bash
+# Start PostgreSQL service (macOS)
+brew services start postgresql
+
+# Or check if it's running
+lsof -i :5432
+```
+
+**Error: "The <SignIn/> component is not configured correctly"**
+
+This error is fixed by using catch-all routes. The project now uses:
+- `/sign-in/[[...sign-in]]/page.tsx` (catch-all route ✅)
+- `/sign-up/[[...sign-up]]/page.tsx` (catch-all route ✅)
+
+**Session Timeout**
+
+Sessions expire after 15 minutes of inactivity. Users will be automatically redirected to sign in again.
 
 ## 📦 Tech Stack
 
@@ -141,7 +202,8 @@ npm run dev          # Start development server
 npm run build        # Build for production
 npm run start        # Start production server
 npm run lint         # Run ESLint
-npm run db:push      # Push schema to database
+npm run db:generate  # Generate Prisma Client
+npm run db:push      # Push schema to database and regenerate client
 npm run db:studio    # Open Prisma Studio
 ```
 

@@ -20,7 +20,7 @@ import {
 async function getUserStats(clerkId: string, clerkUser: any) {
   // Try to find existing user
   let user = await db.user.findUnique({
-    where: { clerkId },
+    where: { id: clerkId },
     include: {
       userToProjects: {
         include: {
@@ -39,7 +39,7 @@ async function getUserStats(clerkId: string, clerkUser: any) {
   if (!user) {
     user = await db.user.create({
       data: {
-        clerkId: clerkUser.id,
+        id: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
