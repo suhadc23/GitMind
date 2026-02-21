@@ -50,7 +50,7 @@ export default function SignUpPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-gray-900">Free to Start</h3>
-                <p className="text-gray-600 text-sm">150 AI credits per month on the free plan</p>
+                <p className="text-gray-600 text-sm">10,000 AI credits on the free plan</p>
               </div>
             </div>
 

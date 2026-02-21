@@ -21,7 +21,7 @@ async function getOrCreateUser(clerkId: string) {
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
         imageUrl: clerkUser.imageUrl,
-        credits: 150,
+        credits: 10000,
       },
     })
   }

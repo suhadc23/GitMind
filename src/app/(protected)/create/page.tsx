@@ -2,246 +2,219 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import {
-  Github,
-  ArrowLeft,
-  Loader2,
-  CheckCircle2,
-  AlertCircle,
-  Star,
-  GitFork,
-  Code2,
-  ExternalLink
-} from 'lucide-react'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { api } from '@/trpc/react'
+import { useRefetch } from '@/hooks/use-refetch'
+import { toast } from 'sonner'
+import { Github, Loader2, Info, CheckCircle2 } from 'lucide-react'
 
-interface RepoInfo {
-  description: string | null
-  language: string | null
-  stars: number
-  forks: number
-  owner: string
-  avatar: string
-}
+const schema = z.object({
+  name: z.string().min(1, 'Project name is required'),
+  githubUrl: z.string().url('Must be a valid URL').includes('github.com', {
+    message: 'Must be a GitHub URL',
+  }),
+  githubToken: z.string().optional(),
+})
 
-interface ProjectResponse {
-  success: boolean
-  project: {
-    id: string
-    name: string
-    githubUrl: string
-    repoInfo: RepoInfo
-  }
-}
+type FormValues = z.infer<typeof schema>
 
 export default function CreateProjectPage() {
   const router = useRouter()
-  const [githubUrl, setGithubUrl] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<ProjectResponse | null>(null)
+  const refetch = useRefetch()
+  const [fileCount, setFileCount] = useState<number | null>(null)
+  const [userCredits, setUserCredits] = useState<number | null>(null)
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setError(null)
-    setSuccess(null)
-    setIsLoading(true)
+  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormValues>({
+    resolver: zodResolver(schema),
+    defaultValues: { name: '', githubUrl: '', githubToken: '' },
+  })
 
-    try {
-      const response = await fetch('/api/projects/create', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ githubUrl }),
-      })
+  const checkCredits = api.project.checkCredits.useMutation()
+  const createProject = api.project.createProject.useMutation()
 
-      const data = await response.json()
+  const githubUrl = watch('githubUrl')
 
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to create project')
-      }
-
-      setSuccess(data)
-
-      // Redirect after 2 seconds
-      setTimeout(() => {
-        router.push('/projects')
-      }, 2000)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong')
-    } finally {
-      setIsLoading(false)
-    }
+  const handleCheckCredits = async () => {
+    if (!githubUrl || !githubUrl.includes('github.com')) return
+    const result = await checkCredits.mutateAsync({
+      githubUrl,
+      githubToken: watch('githubToken'),
+    })
+    setFileCount(result.fileCount)
+    setUserCredits(result.userCredits)
   }
+
+  const onSubmit = async (data: FormValues) => {
+    if (fileCount !== null && userCredits !== null && userCredits < fileCount) {
+      toast.error(`Not enough credits. Need ${fileCount}, have ${userCredits}.`)
+      return
+    }
+
+    createProject.mutate(
+      {
+        name: data.name,
+        githubUrl: data.githubUrl,
+        githubToken: data.githubToken,
+      },
+      {
+        onSuccess: async () => {
+          toast.success('Project created successfully!')
+          await refetch()
+          router.push('/dashboard')
+        },
+        onError: (err) => {
+          toast.error(err.message)
+        },
+      }
+    )
+  }
+
+  const hasEnoughCredits = fileCount === null || userCredits === null || userCredits >= fileCount
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Link href="/projects">
-          <Button variant="ghost" size="icon">
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-        </Link>
-        <div>
-          <h1 className="text-3xl font-bold text-gray-900">Create New Project</h1>
-          <p className="text-gray-600 mt-1">
-            Connect a GitHub repository to start asking questions
-          </p>
-        </div>
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Create New Project</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Connect a GitHub repository to start exploring with AI
+        </p>
       </div>
 
-      {/* Form Card */}
-      <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-8">
-        <div className="flex items-center gap-4 mb-8">
-          <div className="p-4 bg-gradient-to-r from-emerald-100 to-teal-100 rounded-xl">
-            <Github className="h-8 w-8 text-emerald-600" />
-          </div>
-          <div>
-            <h2 className="text-xl font-semibold text-gray-900">
-              Link GitHub Repository
-            </h2>
-            <p className="text-gray-500 text-sm">
-              Enter the URL of a public GitHub repository
-            </p>
-          </div>
-        </div>
-
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-2">
-            <label htmlFor="githubUrl" className="text-sm font-medium text-gray-700">
-              Repository URL
-            </label>
-            <Input
-              id="githubUrl"
-              type="url"
-              placeholder="https://github.com/username/repository"
-              value={githubUrl}
-              onChange={(e) => setGithubUrl(e.target.value)}
-              disabled={isLoading || !!success}
-              className="h-12 text-base"
-              required
-            />
-            <p className="text-xs text-gray-500">
-              Example: https://github.com/facebook/react
-            </p>
-          </div>
-
-          {/* Error Message */}
-          {error && (
-            <div className="flex items-center gap-3 p-4 bg-red-50 border border-red-200 rounded-xl">
-              <AlertCircle className="h-5 w-5 text-red-500 flex-shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Github className="h-5 w-5" />
+            Link GitHub Repository
+          </CardTitle>
+          <CardDescription>
+            Enter the details of the repository you want to analyse
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            {/* Project Name */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Project Name</label>
+              <Input
+                {...register('name')}
+                placeholder="My Awesome Project"
+                disabled={createProject.isPending}
+              />
+              {errors.name && (
+                <p className="text-xs text-destructive">{errors.name.message}</p>
+              )}
             </div>
-          )}
 
-          {/* Success Message */}
-          {success && (
-            <div className="space-y-4">
-              <div className="flex items-center gap-3 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-                <CheckCircle2 className="h-5 w-5 text-emerald-500 flex-shrink-0" />
-                <p className="text-sm text-emerald-700">
-                  Project created successfully! Redirecting...
-                </p>
-              </div>
+            {/* GitHub URL */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">GitHub URL</label>
+              <Input
+                {...register('githubUrl')}
+                placeholder="https://github.com/owner/repo"
+                disabled={createProject.isPending}
+              />
+              {errors.githubUrl && (
+                <p className="text-xs text-destructive">{errors.githubUrl.message}</p>
+              )}
+            </div>
 
-              {/* Repo Info Card */}
-              <div className="p-6 bg-gradient-to-r from-gray-50 to-gray-100 rounded-xl border border-gray-200">
-                <div className="flex items-start gap-4">
-                  <img
-                    src={success.project.repoInfo.avatar}
-                    alt={success.project.repoInfo.owner}
-                    className="w-12 h-12 rounded-full"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-semibold text-gray-900 truncate">
-                        {success.project.name}
-                      </h3>
-                      <a
-                        href={success.project.githubUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-gray-400 hover:text-gray-600"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </a>
-                    </div>
-                    <p className="text-sm text-gray-500 mt-1">
-                      by {success.project.repoInfo.owner}
+            {/* GitHub Token (optional) */}
+            <div className="space-y-1">
+              <label className="text-sm font-medium">
+                GitHub Token{' '}
+                <span className="text-muted-foreground font-normal">(optional, for private repos)</span>
+              </label>
+              <Input
+                {...register('githubToken')}
+                type="password"
+                placeholder="ghp_xxxxxxxxxxxx"
+                disabled={createProject.isPending}
+              />
+            </div>
+
+            {/* Credit Check Result */}
+            {fileCount !== null && userCredits !== null && (
+              <div className={`rounded-lg p-4 border flex items-start gap-3 ${
+                hasEnoughCredits
+                  ? 'bg-emerald-50 border-emerald-200'
+                  : 'bg-red-50 border-red-200'
+              }`}>
+                {hasEnoughCredits ? (
+                  <CheckCircle2 className="h-5 w-5 text-emerald-500 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <Info className="h-5 w-5 text-red-500 flex-shrink-0 mt-0.5" />
+                )}
+                <div className="text-sm">
+                  <p className={hasEnoughCredits ? 'text-emerald-800' : 'text-red-800'}>
+                    This repo will cost <strong>{fileCount} credits</strong>.
+                    You have <strong>{userCredits} credits</strong>.
+                  </p>
+                  {!hasEnoughCredits && (
+                    <p className="text-red-700 mt-1">
+                      You need {fileCount - userCredits} more credits.{' '}
+                      <a href="/billing" className="underline font-medium">Buy more credits</a>
                     </p>
-                    {success.project.repoInfo.description && (
-                      <p className="text-sm text-gray-600 mt-2 line-clamp-2">
-                        {success.project.repoInfo.description}
-                      </p>
-                    )}
-                    <div className="flex items-center gap-4 mt-3">
-                      {success.project.repoInfo.language && (
-                        <span className="flex items-center gap-1 text-xs text-gray-500">
-                          <Code2 className="h-3.5 w-3.5" />
-                          {success.project.repoInfo.language}
-                        </span>
-                      )}
-                      <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <Star className="h-3.5 w-3.5" />
-                        {success.project.repoInfo.stars.toLocaleString()}
-                      </span>
-                      <span className="flex items-center gap-1 text-xs text-gray-500">
-                        <GitFork className="h-3.5 w-3.5" />
-                        {success.project.repoInfo.forks.toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
+                  )}
                 </div>
               </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              {/* Check Credits Button */}
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleCheckCredits}
+                disabled={checkCredits.isPending || !githubUrl?.includes('github.com')}
+                className="gap-2"
+              >
+                {checkCredits.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Info className="h-4 w-4" />
+                )}
+                Check Credits
+              </Button>
+
+              {/* Create Button */}
+              <Button
+                type="submit"
+                disabled={createProject.isPending || !hasEnoughCredits}
+                className="flex-1 gap-2"
+              >
+                {createProject.isPending ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Creating & Indexing...
+                  </>
+                ) : (
+                  <>
+                    <Github className="h-4 w-4" />
+                    Create Project
+                  </>
+                )}
+              </Button>
             </div>
-          )}
+          </form>
+        </CardContent>
+      </Card>
 
-          {/* Submit Button */}
-          {!success && (
-            <Button
-              type="submit"
-              size="lg"
-              className="w-full h-12"
-              disabled={isLoading || !githubUrl}
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Connecting Repository...
-                </>
-              ) : (
-                <>
-                  <Github className="mr-2 h-5 w-5" />
-                  Connect Repository
-                </>
-              )}
-            </Button>
-          )}
-        </form>
-      </div>
-
-      {/* Info Card */}
-      <div className="bg-gradient-to-r from-emerald-50 to-teal-50 rounded-2xl p-6 border border-emerald-100">
-        <h3 className="font-semibold text-gray-900 mb-2">
-          What happens next?
+      {/* Info */}
+      <div className="bg-blue-50 rounded-xl p-4 border border-blue-100">
+        <h3 className="text-sm font-semibold text-blue-900 mb-2 flex items-center gap-2">
+          <Info className="h-4 w-4" />
+          How it works
         </h3>
-        <ul className="space-y-2 text-sm text-gray-600">
-          <li className="flex items-start gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 flex-shrink-0" />
-            <span>We will fetch the repository information from GitHub</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 flex-shrink-0" />
-            <span>The project will be added to your dashboard</span>
-          </li>
-          <li className="flex items-start gap-2">
-            <CheckCircle2 className="h-4 w-4 text-emerald-500 mt-0.5 flex-shrink-0" />
-            <span>You can then ask AI-powered questions about the code</span>
-          </li>
+        <ul className="space-y-1 text-sm text-blue-800">
+          <li>• 1 credit is deducted per file indexed</li>
+          <li>• Click "Check Credits" to see how many credits this repo requires</li>
+          <li>• Indexing happens automatically after project creation</li>
+          <li>• You start with 10,000 free credits</li>
         </ul>
       </div>
     </div>

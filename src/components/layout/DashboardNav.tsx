@@ -8,7 +8,7 @@ interface DashboardNavProps {
   userCredits?: number
 }
 
-export function DashboardNav({ onMenuClick, userCredits = 150 }: DashboardNavProps) {
+export function DashboardNav({ onMenuClick, userCredits = 10000 }: DashboardNavProps) {
   const { user } = useUser()
 
   return (

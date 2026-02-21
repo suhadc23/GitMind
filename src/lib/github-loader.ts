@@ -66,13 +66,15 @@ export async function loadGithubRepo(
   githubUrl: string,
   githubToken?: string
 ): Promise<Document[]> {
-  console.log('📦 Loading repository:', githubUrl)
+  // Normalize URL: strip trailing .git so GithubRepoLoader doesn't choke
+  const normalizedUrl = githubUrl.replace(/\.git$/, '')
+  console.log('📦 Loading repository:', normalizedUrl)
 
   // Detect the default branch dynamically
-  const branch = await detectDefaultBranch(githubUrl, githubToken)
+  const branch = await detectDefaultBranch(normalizedUrl, githubToken)
   console.log(`🌿 Using branch: ${branch}`)
 
-  const loader = new GithubRepoLoader(githubUrl, {
+  const loader = new GithubRepoLoader(normalizedUrl, {
     accessToken: githubToken || process.env.GITHUB_TOKEN || '',
     branch: branch,
     ignoreFiles: [
@@ -233,11 +235,12 @@ export async function indexGithubRepo(
   githubUrl: string,
   githubToken?: string
 ) {
+  const githubUrlClean = githubUrl.replace(/\.git$/, '')
   console.log('🚀 Starting indexing for project:', projectId)
-  console.log('📍 Repository:', githubUrl)
+  console.log('📍 Repository:', githubUrlClean)
 
   // Step 1: Load repository files
-  const docs = await loadGithubRepo(githubUrl, githubToken)
+  const docs = await loadGithubRepo(githubUrlClean, githubToken)
 
   if (docs.length === 0) {
     throw new Error('No files found in repository')

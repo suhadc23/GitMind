@@ -53,6 +53,7 @@ interface QueryResponse {
   question: string
   answer: string
   creditsRemaining: number
+  error?: string
 }
 
 export default function ProjectDetailPage() {

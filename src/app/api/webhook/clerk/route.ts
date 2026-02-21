@@ -61,7 +61,7 @@ export async function POST(req: Request) {
           firstName: first_name || null,
           lastName: last_name || null,
           imageUrl: image_url || null,
-          credits: 150, // Default credits for new users
+          credits: 10000, // Default credits for new users
         },
       })
 

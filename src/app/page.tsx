@@ -75,7 +75,7 @@ export default function HomePage() {
       price: 'Free',
       description: 'Perfect for individual developers',
       features: [
-        '150 AI credits per month',
+        '10,000 AI credits per month',
         'Up to 3 repositories',
         'Basic code analysis',
         'Community support',

@@ -20,7 +20,7 @@ async function getOrCreateUser(clerkId: string) {
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
         imageUrl: clerkUser.imageUrl,
-        credits: 150,
+        credits: 10000,
       },
     })
   }
@@ -65,7 +65,6 @@ async function fetchIndexedCode(projectId: string): Promise<string | null> {
         sourceCode: true,
       },
       take: 15, // Limit to 15 most relevant files
-      orderBy: { createdAt: 'desc' },
     })
 
     if (embeddings.length === 0) return null
