@@ -6,6 +6,7 @@ import { MeetingCard } from './meeting-card'
 import { TeamMembers } from './team-members'
 import { InviteButton } from './invite-button'
 import { ArchiveButton } from './archive-button'
+import { DeleteButton } from './delete-button'
 
 export default async function DashboardPage() {
   const { userId } = await auth()
@@ -24,6 +25,7 @@ export default async function DashboardPage() {
         <div className="flex items-center gap-2">
           <InviteButton />
           <ArchiveButton />
+          <DeleteButton />
         </div>
       </div>
 

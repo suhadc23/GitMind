@@ -4,6 +4,15 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog'
+import { useProject } from '@/hooks/use-project'
+import {
   Plus,
   Github,
   Star,
@@ -38,6 +47,7 @@ export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const { projectId: activeProjectId, clearProject } = useProject()
 
   useEffect(() => {
     async function fetchProjects() {
@@ -60,9 +70,8 @@ export default function ProjectsPage() {
     fetchProjects()
   }, [])
 
-  // Handle project deletion
-  const handleDeleteProject = async (projectId: string) => {
-    // Optimistically remove from UI
+  const handleDeleteProject = (projectId: string) => {
+    if (projectId === activeProjectId) clearProject()
     setProjects(prev => prev.filter(p => p.id !== projectId))
   }
 
@@ -158,6 +167,7 @@ function ProjectCard({
   onDelete: (projectId: string) => void
 }) {
   const [isDeleting, setIsDeleting] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-US', {
@@ -168,13 +178,6 @@ function ProjectCard({
   }
 
   const handleDelete = async () => {
-    // Confirm deletion
-    const confirmDelete = window.confirm(
-      `Are you sure you want to delete "${project.name}"?\n\nThis will permanently remove:\n- The project\n- All indexed code\n- All questions and answers\n\nThis action cannot be undone.`
-    )
-
-    if (!confirmDelete) return
-
     setIsDeleting(true)
 
     try {
@@ -188,20 +191,52 @@ function ProjectCard({
         throw new Error(data.error || 'Failed to delete project')
       }
 
-      // Update parent state to remove project from UI
+      setDialogOpen(false)
       onDelete(project.id)
     } catch (error) {
       console.error('Error deleting project:', error)
-      alert(error instanceof Error ? error.message : 'Failed to delete project')
       setIsDeleting(false)
     }
   }
 
   return (
     <div className="bg-white rounded-2xl shadow-md border border-gray-200 p-6 hover:shadow-lg transition-shadow relative">
+      {/* Delete confirmation dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete &quot;{project.name}&quot;?</DialogTitle>
+            <DialogDescription>
+              This will permanently remove the project, all indexed code, all
+              questions and answers, commits, and meetings. This action cannot
+              be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDelete}
+              disabled={isDeleting}
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                'Delete permanently'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Delete button in top-right corner */}
       <button
-        onClick={handleDelete}
+        onClick={() => setDialogOpen(true)}
         disabled={isDeleting}
         className="absolute top-4 right-4 p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         title="Delete project"

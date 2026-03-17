@@ -15,7 +15,7 @@ model User {
   firstName          String?
   lastName           String?
   emailAddress       String              @unique
-  credits            Int                 @default(150)
+  credits            Int                 @default(10000)
   questions          Question[]
   stripeTransactions StripeTransaction[]
   userToProjects     UserToProject[]

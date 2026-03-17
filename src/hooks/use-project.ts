@@ -9,10 +9,13 @@ export function useProject() {
 
   const project = projects?.find((p) => p.id === projectId)
 
+  const clearProject = () => setProjectId('')
+
   return {
     projects,
     project,
     projectId,
     setProjectId,
+    clearProject,
   }
 }
