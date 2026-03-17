@@ -183,4 +183,39 @@ export const projectRouter = createTRPCRouter({
       orderBy: { createdAt: 'desc' },
     })
   }),
+
+  getProjectById: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      const project = await ctx.db.project.findUnique({
+        where: { id: input.projectId, deletedAt: null },
+        select: {
+          id: true,
+          name: true,
+          githubUrl: true,
+          _count: { select: { userToProjects: true } },
+        },
+      })
+      if (!project) throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' })
+      return project
+    }),
+
+  joinProject: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await ctx.db.project.findUnique({
+        where: { id: input.projectId, deletedAt: null },
+      })
+      if (!project) throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' })
+
+      const existing = await ctx.db.userToProject.findUnique({
+        where: { userId_projectId: { userId: ctx.userId, projectId: input.projectId } },
+      })
+      if (existing) return { alreadyMember: true }
+
+      await ctx.db.userToProject.create({
+        data: { userId: ctx.userId, projectId: input.projectId },
+      })
+      return { alreadyMember: false }
+    }),
 })
