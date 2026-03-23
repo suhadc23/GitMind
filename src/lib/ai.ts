@@ -128,9 +128,9 @@ export const summarizeCode = async (code: string, fileName: string): Promise<str
             content: `You are onboarding a junior software engineer and explaining to them the purpose of the ${fileName} file.\n\nHere is the code:\n---\n${codeSnippet}\n---\n\nGive a summary no more than 100 words of the code above.`,
           },
         ],
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-8b-instant',
         temperature: 0.3,
-        max_tokens: 200,
+        max_tokens: 150,
       })
 
       return completion.choices[0]?.message?.content || ''

@@ -1,4 +1,3 @@
-import { GithubRepoLoader } from '@langchain/community/document_loaders/web/github'
 import { Document } from '@langchain/core/documents'
 import { summarizeCode } from './ai'
 import { db } from '@/server/db'
@@ -61,46 +60,78 @@ async function detectDefaultBranch(
   }
 }
 
-// Load repository files using LangChain
+const SKIP_PATHS = /\/(node_modules|\.next|dist|build|\.git|coverage|__pycache__|\.pytest_cache)\//i
+const SKIP_FILE_NAMES = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i
+
+// Load repository files using GitHub tree API — one API call for all paths,
+// then parallel-fetch only source files (no LangChain loader needed)
 export async function loadGithubRepo(
   githubUrl: string,
   githubToken?: string
 ): Promise<Document[]> {
-  // Normalize URL: strip trailing .git so GithubRepoLoader doesn't choke
   const normalizedUrl = githubUrl.replace(/\.git$/, '')
   console.log('📦 Loading repository:', normalizedUrl)
 
-  // Detect the default branch dynamically
+  const { owner, repo } = parseGithubUrl(normalizedUrl)
+  const octokit = new Octokit({ auth: githubToken || process.env.GITHUB_TOKEN })
+
   const branch = await detectDefaultBranch(normalizedUrl, githubToken)
   console.log(`🌿 Using branch: ${branch}`)
 
-  const loader = new GithubRepoLoader(normalizedUrl, {
-    accessToken: githubToken || process.env.GITHUB_TOKEN || '',
-    branch: branch,
-    ignoreFiles: [
-      'package-lock.json',
-      'yarn.lock',
-      'pnpm-lock.yaml',
-      'bun.lockb',
-      '.next',
-      'node_modules',
-      '.git',
-      'dist',
-      'build',
-    ],
-    recursive: true,
-    unknown: 'warn',
-    maxConcurrency: 5,
+  // 1 API call to get ALL file paths recursively
+  const { data: treeData } = await octokit.rest.git.getTree({
+    owner,
+    repo,
+    tree_sha: branch,
+    recursive: '1',
   })
 
-  try {
-    const docs = await loader.load()
-    console.log(`✅ Loaded ${docs.length} files from repository`)
-    return docs
-  } catch (error) {
-    console.error('❌ Error loading repository:', error)
-    throw new Error('Failed to load repository. Check URL and access permissions.')
+  // Filter to only fetchable source/text files
+  const candidates = treeData.tree.filter((item) => {
+    if (item.type !== 'blob') return false
+    const path = item.path ?? ''
+    if (SKIP_PATHS.test(`/${path}/`)) return false
+    if (SKIP_FILE_NAMES.test(path.split('/').pop() ?? '')) return false
+    if ((item.size ?? 0) > 100000) return false // skip files > 100KB
+    if (SOURCE_EXT.test(path)) return true       // always include source files
+    // include small config/text files too
+    if (/\.(json|yaml|yml|md|txt|env|toml|ini|cfg|html|css|scss|less)$/i.test(path)) return true
+    return false
+  })
+
+  console.log(`📋 Found ${candidates.length} relevant files in tree (from ${treeData.tree.length} total)`)
+
+  // Fetch content in parallel — 20 at a time
+  const FETCH_CONCURRENCY = 20
+  const docs: Document[] = []
+
+  for (let i = 0; i < candidates.length; i += FETCH_CONCURRENCY) {
+    const batch = candidates.slice(i, i + FETCH_CONCURRENCY)
+    const results = await Promise.allSettled(
+      batch.map(async (item) => {
+        const { data } = await octokit.rest.repos.getContent({
+          owner,
+          repo,
+          path: item.path!,
+          ref: branch,
+        })
+        if ('content' in data && data.encoding === 'base64') {
+          const content = Buffer.from(data.content, 'base64').toString('utf8')
+          return new Document({
+            pageContent: content,
+            metadata: { source: item.path },
+          })
+        }
+        return null
+      })
+    )
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value) docs.push(r.value)
+    }
   }
+
+  console.log(`✅ Fetched content for ${docs.length} files`)
+  return docs
 }
 
 // Check file count for credit calculation
@@ -175,58 +206,87 @@ async function countFilesRecursive(
   }
 }
 
-// Generate summaries for documents (simplified - no embeddings)
+// File extension classifiers
+const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|swift|kt|cs|cpp|c|h|vue|svelte)$/i
+const SKIP_EXT = /\.(lock|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|mp3|wav|pdf|zip|tar|gz|bin|exe)$/i
+
+function shouldSkipFile(fileName: string, content: string): boolean {
+  if (SKIP_EXT.test(fileName)) return true          // binary / lock files
+  if (content.length < 50) return true              // empty / trivial
+  if (content.length > 100000) return true          // over 100KB
+  return false
+}
+
+function autoSummary(fileName: string): string {
+  const name = fileName.split('/').pop() ?? fileName
+  return `Configuration/data file: ${name}`
+}
+
+// Strip null bytes — PostgreSQL rejects 0x00 in text columns
+const sanitize = (s: string) => s.replace(/\x00/g, '')
+
+// Generate summaries — AI only for source code, instant for config files
 async function generateSummaries(docs: Document[]) {
-  console.log(`📝 Generating summaries for ${docs.length} files...`)
+  console.log(`📝 Processing ${docs.length} files...`)
 
-  // Process in batches of 5 for better parallelization
-  const batchSize = 5
-  const summaries: any[] = []
+  // Split into source (needs AI) vs config (instant)
+  const sourceDocs: Document[] = []
+  const configDocs: Document[] = []
 
-  for (let i = 0; i < docs.length; i += batchSize) {
-    const batch = docs.slice(i, i + batchSize)
-    console.log(`   Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(docs.length / batchSize)}`)
+  for (const doc of docs) {
+    const fileName = doc.metadata.source ?? ''
+    if (shouldSkipFile(fileName, doc.pageContent)) continue
+    if (SOURCE_EXT.test(fileName)) {
+      sourceDocs.push(doc)
+    } else {
+      configDocs.push(doc)
+    }
+  }
+
+  console.log(`   🔵 Source files (AI summary): ${sourceDocs.length}`)
+  console.log(`   ⚪ Config files (instant):    ${configDocs.length}`)
+
+  // Config files — no AI, instant
+  const configResults = configDocs.map((doc) => ({
+    summary: autoSummary(doc.metadata.source ?? ''),
+    sourceCode: sanitize(doc.pageContent).slice(0, 20000),
+    fileName: doc.metadata.source ?? '',
+  }))
+
+  // Source files — AI summaries in parallel batches of 20
+  const BATCH_SIZE = 20
+  const sourceResults: Array<{ summary: string; sourceCode: string; fileName: string }> = []
+
+  for (let i = 0; i < sourceDocs.length; i += BATCH_SIZE) {
+    const batch = sourceDocs.slice(i, i + BATCH_SIZE)
+    const batchNum = Math.floor(i / BATCH_SIZE) + 1
+    const totalBatches = Math.ceil(sourceDocs.length / BATCH_SIZE)
+    console.log(`   Summarizing batch ${batchNum}/${totalBatches} (${batch.length} files)...`)
 
     const batchResults = await Promise.all(
-      batch.map(async (doc, batchIndex) => {
-        const globalIndex = i + batchIndex
+      batch.map(async (doc) => {
         try {
-          console.log(`   [${globalIndex + 1}/${docs.length}] ${doc.metadata.source}`)
-
-          // Skip very large files (>50KB) for faster processing
-          if (doc.pageContent.length > 50000) {
-            console.log(`   ⏭️  Skipping large file: ${doc.metadata.source}`)
-            return null
-          }
-
-          // Limit code to 5k characters for faster processing
-          const code = doc.pageContent.slice(0, 5000)
-          const summary = await summarizeCode(code, doc.metadata.source)
-
-          if (!summary) {
-            console.warn(`   ⚠️ No summary generated for ${doc.metadata.source}`)
-            return null
-          }
-
+          const clean = sanitize(doc.pageContent)
+          const code = clean.slice(0, 5000)
+          const summary = await summarizeCode(code, doc.metadata.source ?? '')
+          if (!summary) return null
           return {
             summary,
-            sourceCode: doc.pageContent.slice(0, 20000), // Store max 20KB
-            fileName: doc.metadata.source,
+            sourceCode: clean.slice(0, 20000),
+            fileName: doc.metadata.source ?? '',
           }
-        } catch (error) {
-          console.error(`   ❌ Error processing ${doc.metadata.source}:`, error)
+        } catch {
           return null
         }
       })
     )
 
-    summaries.push(...batchResults)
+    sourceResults.push(...(batchResults.filter(Boolean) as typeof sourceResults))
   }
 
-  const validSummaries = summaries.filter((s) => s !== null)
-  console.log(`✅ Successfully generated ${validSummaries.length} summaries`)
-
-  return validSummaries
+  const all = [...sourceResults, ...configResults]
+  console.log(`✅ Indexed ${all.length} files (${sourceResults.length} with AI summaries, ${configResults.length} config)`)
+  return all
 }
 
 // Main indexing function (SIMPLIFIED - No Vector Embeddings)
@@ -246,41 +306,35 @@ export async function indexGithubRepo(
     throw new Error('No files found in repository')
   }
 
-  // Limit to 10 files for faster processing (demo purposes)
-  const limitedDocs = docs.slice(0, 10)
-  console.log(`📊 Processing ${limitedDocs.length} files (limited for demo - faster indexing)`)
+  console.log(`📊 Loaded ${docs.length} files — indexing all of them`)
 
-  // Step 2: Generate summaries (no embeddings in simplified version)
-  const summaries = await generateSummaries(limitedDocs)
+  // Clear previous indexing so stale files don't pollute search results
+  await db.sourceCodeEmbedding.deleteMany({ where: { projectId } })
+  console.log(`🗑️  Cleared previous index for project ${projectId}`)
+
+  // Step 2: Generate summaries (AI for source files, instant for config)
+  const summaries = await generateSummaries(docs)
 
   if (summaries.length === 0) {
     throw new Error('Failed to generate any summaries')
   }
 
-  // Step 3: Store in database (text only, no vectors)
-  console.log('💾 Storing summaries in database...')
+  // Step 3: Batch insert into DB — one query instead of N
+  console.log(`💾 Storing ${summaries.length} files in database...`)
 
-  const results = await Promise.allSettled(
-    summaries.map(async (item) => {
-      if (!item) return null
+  await db.sourceCodeEmbedding.createMany({
+    data: summaries.map((item) => ({
+      summary: item.summary,
+      sourceCode: item.sourceCode,
+      fileName: item.fileName,
+      projectId,
+    })),
+  })
 
-      return await db.sourceCodeEmbedding.create({
-        data: {
-          summary: item.summary,
-          sourceCode: item.sourceCode,
-          fileName: item.fileName,
-          projectId,
-        },
-      })
-    })
-  )
-
-  const successful = results.filter((r) => r.status === 'fulfilled').length
-  console.log(`✅ Successfully indexed ${successful}/${summaries.length} files`)
+  console.log(`✅ Successfully indexed ${summaries.length} files`)
 
   return {
-    indexed: successful,
+    indexed: summaries.length,
     total: docs.length,
-    limited: limitedDocs.length,
   }
 }

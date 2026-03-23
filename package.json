@@ -17,6 +17,8 @@
   "dependencies": {
     "@ai-sdk/groq": "^3.0.24",
     "@clerk/nextjs": "^6.9.6",
+    "@ffmpeg/ffmpeg": "^0.12.15",
+    "@ffmpeg/util": "^0.12.2",
     "@google/generative-ai": "^0.24.1",
     "@hookform/resolvers": "^5.2.2",
     "@langchain/community": "^1.1.12",
@@ -72,7 +74,9 @@
     "react-dom": "^18.3.1",
     "react-dropzone": "^15.0.0",
     "react-hook-form": "^7.71.1",
+    "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.0",
+    "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1",
     "sonner": "^2.0.7",
     "stripe": "^20.3.1",

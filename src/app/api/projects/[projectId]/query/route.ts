@@ -3,6 +3,25 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/server/db'
 import { askAI } from '@/lib/ai'
 
+const STOP_WORDS = new Set([
+  'a','an','the','is','are','was','were','be','been','being','have','has','had',
+  'do','does','did','will','would','could','should','may','might','can',
+  'what','which','who','when','where','why','how','this','that','these','those',
+  'i','me','my','we','our','you','your','he','she','they','them','it','its',
+  'for','from','in','into','of','on','or','and','to','at','by','with','about',
+  'not','no','so','very','just','get','give','show','tell','find','use','make',
+  'all','some','any','each','every','more','most','other','same','than','too',
+  'explain','describe','want','know','think','see','look','also',
+])
+
+function extractKeywords(question: string): string[] {
+  return question
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w))
+}
+
 // Get or create user in database
 async function getOrCreateUser(clerkId: string) {
   let user = await db.user.findUnique({
@@ -54,28 +73,41 @@ async function fetchRepoReadme(githubUrl: string): Promise<string | null> {
   }
 }
 
-// Fetch indexed code summaries from database
-async function fetchIndexedCode(projectId: string): Promise<string | null> {
+// Fetch indexed code summaries from database — keyword-filtered for relevance
+async function fetchIndexedCode(projectId: string, question: string): Promise<string | null> {
   try {
-    const embeddings = await db.sourceCodeEmbedding.findMany({
-      where: { projectId },
-      select: {
-        fileName: true,
-        summary: true,
-        sourceCode: true,
-      },
-      take: 15, // Limit to 15 most relevant files
-    })
+    const keywords = extractKeywords(question)
+    const orConditions = keywords.flatMap((kw) => [
+      { summary: { contains: kw, mode: 'insensitive' as const } },
+      { fileName: { contains: kw, mode: 'insensitive' as const } },
+      { sourceCode: { contains: kw, mode: 'insensitive' as const } },
+    ])
+
+    // First pass: keyword-matched files
+    let embeddings = orConditions.length > 0
+      ? await db.sourceCodeEmbedding.findMany({
+          where: { projectId, OR: orConditions },
+          select: { fileName: true, summary: true, sourceCode: true },
+          take: 10,
+        })
+      : []
+
+    // Fallback: if nothing matched, take any 5 files
+    if (embeddings.length === 0) {
+      embeddings = await db.sourceCodeEmbedding.findMany({
+        where: { projectId },
+        select: { fileName: true, summary: true, sourceCode: true },
+        take: 5,
+      })
+    }
 
     if (embeddings.length === 0) return null
 
-    // Build context from code summaries
     let context = '=== INDEXED CODE FILES ===\n\n'
-
     for (const file of embeddings) {
       context += `\n📄 File: ${file.fileName}\n`
       context += `📝 Summary: ${file.summary}\n`
-      context += `💻 Code Preview:\n\`\`\`\n${file.sourceCode.slice(0, 500)}...\n\`\`\`\n\n`
+      context += `💻 Code:\n\`\`\`\n${file.sourceCode.slice(0, 6000)}\n\`\`\`\n\n`
     }
 
     return context
@@ -158,7 +190,7 @@ export async function POST(
     // Fetch repo context - prioritize indexed code over README
     const [repoInfo, indexedCode, readme] = await Promise.all([
       fetchRepoInfo(project.githubUrl),
-      fetchIndexedCode(projectId),
+      fetchIndexedCode(projectId, question),
       fetchRepoReadme(project.githubUrl),
     ])
 

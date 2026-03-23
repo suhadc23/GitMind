@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Bot, CreditCard, FileText, GitBranch, LayoutDashboard, Plus, Presentation } from 'lucide-react'
+import { Bot, CreditCard, FileText, FolderKanban, GitBranch, LayoutDashboard, Presentation } from 'lucide-react'
 import { UserButton } from '@clerk/nextjs'
 
 import {
@@ -17,14 +17,12 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from '@/components/ui/sidebar'
-import { useProject } from '@/hooks/use-project'
-import { cn } from '@/lib/utils'
-import { Button } from '@/components/ui/button'
 
 const items = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Q&A', url: '/qa', icon: Bot },
   { title: 'Meetings', url: '/meetings', icon: Presentation },
+  { title: 'Projects', url: '/projects', icon: FolderKanban },
   { title: 'Billing', url: '/billing', icon: CreditCard },
   { title: 'Repo Explorer', url: '/aimodels', icon: GitBranch },
   { title: 'Doc Summarizer', url: '/docsummarizer', icon: FileText },
@@ -32,7 +30,6 @@ const items = [
 
 export function AppSidebar() {
   const pathname = usePathname()
-  const { projects, projectId, setProjectId } = useProject()
 
   return (
     <Sidebar collapsible="icon" variant="sidebar">
@@ -48,7 +45,6 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Main Navigation */}
         <SidebarGroup>
           <SidebarGroupLabel>Application</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -67,49 +63,6 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Projects */}
-        <SidebarGroup>
-          <SidebarGroupLabel>Your Projects</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {projects?.map((project) => (
-                <SidebarMenuItem key={project.id}>
-                  <SidebarMenuButton
-                    isActive={projectId === project.id}
-                    onClick={() => setProjectId(project.id)}
-                    tooltip={project.name}
-                  >
-                    <div
-                      className={cn(
-                        'flex h-5 w-5 items-center justify-center rounded-sm border text-xs font-semibold',
-                        projectId === project.id
-                          ? 'bg-primary border-primary text-primary-foreground'
-                          : 'bg-white border-sidebar-border text-sidebar-foreground'
-                      )}
-                    >
-                      {project.name[0]?.toUpperCase()}
-                    </div>
-                    <span>{project.name}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-
-              <SidebarMenuItem>
-                <Link href="/create">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="w-full mt-1 group-data-[collapsible=icon]:hidden"
-                  >
-                    <Plus className="mr-1 h-3 w-3" />
-                    Create Project
-                  </Button>
-                </Link>
-              </SidebarMenuItem>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>

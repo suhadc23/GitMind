@@ -99,6 +99,25 @@ export const projectRouter = createTRPCRouter({
       })
     }),
 
+  getAllAnswers: protectedProcedure.query(async ({ ctx }) => {
+    const projects = await ctx.db.project.findMany({
+      where: {
+        userToProjects: { some: { userId: ctx.userId } },
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        questions: {
+          orderBy: { createdAt: 'desc' },
+          include: { user: true },
+        },
+      },
+    })
+    return projects.filter((p) => p.questions.length > 0)
+  }),
+
   archiveProject: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -146,6 +165,25 @@ export const projectRouter = createTRPCRouter({
         include: { issues: true },
       })
     }),
+
+  getAllMeetings: protectedProcedure.query(async ({ ctx }) => {
+    const projects = await ctx.db.project.findMany({
+      where: {
+        userToProjects: { some: { userId: ctx.userId } },
+        deletedAt: null,
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        name: true,
+        meetings: {
+          orderBy: { createdAt: 'desc' },
+          include: { issues: true },
+        },
+      },
+    })
+    return projects.filter((p) => p.meetings.length > 0)
+  }),
 
   deleteMeeting: protectedProcedure
     .input(z.object({ meetingId: z.string() }))

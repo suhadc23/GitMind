@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { processMeeting } from '@/lib/assembly'
 
+export const maxDuration = 300
+
 export async function POST(req: NextRequest) {
   try {
     const { meetingId, meetingUrl } = await req.json()
@@ -16,14 +18,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Fire and forget - process in background
-    processMeeting(meetingUrl, meetingId).catch((err) => {
-      console.error('Meeting processing error:', err)
-    })
-
+    await processMeeting(meetingUrl, meetingId)
     return NextResponse.json({ success: true })
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
     console.error('Process meeting error:', error)
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
+    return NextResponse.json({ error: msg }, { status: 500 })
   }
 }

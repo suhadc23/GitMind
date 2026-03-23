@@ -8,7 +8,8 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { FileText, Upload, Loader2, CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
-import MDEditor from '@uiw/react-md-editor'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface AnalysisResult {
   fileName: string
@@ -135,10 +136,26 @@ export default function DocSummarizerPage() {
                 </div>
               </CardHeader>
               <CardContent>
-                <MDEditor.Markdown
-                  source={result.summary}
-                  className="prose max-w-none text-sm dark:prose-invert"
-                />
+                <div className="prose max-w-none text-sm text-gray-900 break-words">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      pre: (props) => (
+                        <pre className="overflow-x-auto bg-gray-900 rounded p-3 my-2 text-gray-100 text-xs whitespace-pre" {...props} />
+                      ),
+                      code: ({ className, children, ...props }: any) => {
+                        const isBlock = !!className?.startsWith('language-')
+                        return isBlock ? (
+                          <code className={className} {...props}>{children}</code>
+                        ) : (
+                          <code className="bg-gray-100 text-gray-800 rounded px-1 text-xs" {...props}>{children}</code>
+                        )
+                      },
+                    }}
+                  >
+                    {result.summary}
+                  </ReactMarkdown>
+                </div>
               </CardContent>
             </Card>
           ))}

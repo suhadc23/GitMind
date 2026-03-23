@@ -17,7 +17,8 @@ import { CodeReferences } from './code-references'
 import { api } from '@/trpc/react'
 import { toast } from 'sonner'
 import { useProject } from '@/hooks/use-project'
-import MDEditor from '@uiw/react-md-editor'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 type FileReference = {
   id: string
@@ -37,17 +38,17 @@ export function AskQuestionCard() {
 
   const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    if (!project?.id) return
     setAnswer('')
     setFilesReferences([])
     setLoading(true)
     setOpen(true)
 
     try {
+      // No projectId → all-projects mode: searches across all user repos
       const response = await fetch('/api/ask-question', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, projectId: project.id }),
+        body: JSON.stringify({ question }),
       })
 
       if (!response.ok) {
@@ -100,7 +101,7 @@ export function AskQuestionCard() {
   return (
     <>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[80vw] max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[80vw] max-h-[80vh] overflow-y-auto overflow-x-hidden">
           <DialogHeader>
             <div className="flex items-center gap-2">
               <DialogTitle>
@@ -120,17 +121,33 @@ export function AskQuestionCard() {
                   GM
                 </AvatarFallback>
               </Avatar>
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 overflow-hidden">
                 {loading && !answer && (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     Analyzing your codebase...
                   </div>
                 )}
-                <MDEditor.Markdown
-                  source={answer}
-                  className="prose max-w-none text-sm dark:prose-invert"
-                />
+                <div className="prose max-w-none text-sm text-gray-900 break-words">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{
+                      pre: (props) => (
+                        <pre className="overflow-x-auto bg-gray-900 rounded p-3 my-2 text-gray-100 text-xs whitespace-pre" {...props} />
+                      ),
+                      code: ({ className, children, ...props }: any) => {
+                        const isBlock = !!className?.startsWith('language-')
+                        return isBlock ? (
+                          <code className={className} {...props}>{children}</code>
+                        ) : (
+                          <code className="bg-gray-100 text-gray-800 rounded px-1 text-xs" {...props}>{children}</code>
+                        )
+                      },
+                    }}
+                  >
+                    {answer}
+                  </ReactMarkdown>
+                </div>
               </div>
             </div>
 
@@ -144,8 +161,8 @@ export function AskQuestionCard() {
               </div>
             )}
 
-            {/* Save Button */}
-            {!loading && answer && (
+            {/* Save Button — only when a project is selected in the sidebar */}
+            {!loading && answer && project?.id && (
               <div className="flex justify-end">
                 <Button onClick={handleSave} disabled={saveAnswer.isPending} size="sm">
                   {saveAnswer.isPending ? (
@@ -181,7 +198,7 @@ export function AskQuestionCard() {
             <div className="flex items-center gap-2">
               <Button
                 type="submit"
-                disabled={loading || !question.trim() || !project?.id}
+                disabled={loading || !question.trim()}
                 className="gap-2"
               >
                 {loading ? (
@@ -196,11 +213,6 @@ export function AskQuestionCard() {
                   </>
                 )}
               </Button>
-              {!project?.id && (
-                <span className="text-xs text-muted-foreground">
-                  Select a project to ask questions
-                </span>
-              )}
             </div>
           </form>
         </CardContent>
