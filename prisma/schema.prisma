@@ -33,6 +33,7 @@ model Project {
   questions            Question[]
   sourceCodeEmbeddings SourceCodeEmbedding[]
   userToProjects       UserToProject[]
+  codeHealthReport     CodeHealthReport?
 }
 
 model UserToProject {
@@ -120,4 +121,32 @@ model Commit {
 enum MeetingStatus {
   PROCESSING
   COMPLETED
+}
+
+model CodeHealthReport {
+  id                 String             @id @default(cuid())
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  projectId          String             @unique
+  project            Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  overallScore       Int
+  cleanlinessScore   Int
+  organizationScore  Int
+  errorHandlingScore Int
+  duplicationScore   Int
+  documentationScore Int
+  todoCount          Int
+  fixmeCount         Int
+  consoleLogs        Int
+  largeFileCount     Int
+  totalFilesAnalyzed Int
+  fileDetails        Json
+  aiInsights         String             @db.Text
+  status             HealthReportStatus @default(PROCESSING)
+}
+
+enum HealthReportStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
 }

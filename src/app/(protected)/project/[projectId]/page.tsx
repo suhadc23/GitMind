@@ -626,7 +626,7 @@ export default function ProjectDetailPage() {
 
       {/* Answer Sheet */}
       <Sheet open={!!selectedQuestion} onOpenChange={(open) => { if (!open) setSelectedQuestion(null) }}>
-        <SheetContent className="sm:max-w-xl overflow-y-auto">
+        <SheetContent className="sm:max-w-xl overflow-y-auto overflow-x-hidden">
           <SheetHeader className="text-left">
             <SheetTitle>{selectedQuestion?.question}</SheetTitle>
           </SheetHeader>
@@ -818,7 +818,7 @@ export default function ProjectDetailPage() {
 
       {/* Issues Sheet */}
       <Sheet open={!!selectedMeeting} onOpenChange={(open) => { if (!open) setSelectedMeeting(null) }}>
-        <SheetContent className="sm:max-w-xl overflow-y-auto">
+        <SheetContent className="sm:max-w-xl overflow-y-auto overflow-x-hidden">
           <SheetHeader className="text-left">
             <SheetTitle>
               {meetings?.find((m) => m.id === selectedMeeting)?.name} — Issues

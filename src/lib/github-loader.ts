@@ -62,6 +62,8 @@ async function detectDefaultBranch(
 
 const SKIP_PATHS = /\/(node_modules|\.next|dist|build|\.git|coverage|__pycache__|\.pytest_cache)\//i
 const SKIP_FILE_NAMES = /^(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|bun\.lockb)$/i
+const README_PATTERN = /(?:^|\/)readme\.(md|txt|rst|adoc|markdown)$/i
+const NOTEBOOK_EXT = /\.ipynb$/i
 
 // Load repository files using GitHub tree API — one API call for all paths,
 // then parallel-fetch only source files (no LangChain loader needed)
@@ -207,7 +209,7 @@ async function countFilesRecursive(
 }
 
 // File extension classifiers
-const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|swift|kt|cs|cpp|c|h|vue|svelte)$/i
+const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|rb|php|swift|kt|cs|cpp|c|h|vue|svelte|ipynb)$/i
 const SKIP_EXT = /\.(lock|png|jpg|jpeg|gif|svg|ico|woff|woff2|ttf|eot|mp4|mp3|wav|pdf|zip|tar|gz|bin|exe)$/i
 
 function shouldSkipFile(fileName: string, content: string): boolean {
@@ -225,35 +227,74 @@ function autoSummary(fileName: string): string {
 // Strip null bytes — PostgreSQL rejects 0x00 in text columns
 const sanitize = (s: string) => s.replace(/\x00/g, '')
 
-// Generate summaries — AI only for source code, instant for config files
+// Fallback summary when AI is unavailable (rate-limited / quota exceeded)
+// Uses first meaningful lines of content so the file still gets indexed and is searchable
+function fallbackSummary(fileName: string, content: string): string {
+  const name = fileName.split('/').pop() ?? fileName
+  const firstChars = content.replace(/\s+/g, ' ').trim().slice(0, 250)
+  return `${name}: ${firstChars}`
+}
+
+// Extract source code from Jupyter notebook cells instead of sending raw JSON
+// Raw .ipynb JSON wastes the 5000-char window on metadata; this gets to actual code
+function extractNotebookCode(raw: string): string {
+  try {
+    const nb = JSON.parse(raw) as {
+      cells?: Array<{ cell_type: string; source: string | string[] }>
+    }
+    const code = (nb.cells ?? [])
+      .filter((c) => c.cell_type === 'code')
+      .map((c) => (Array.isArray(c.source) ? c.source.join('') : c.source))
+      .join('\n\n')
+    return code.slice(0, 5000) || raw.slice(0, 5000)
+  } catch {
+    return raw.slice(0, 5000)
+  }
+}
+
+// Generate summaries — README uses raw content, source files use AI with fallback, config is instant
 async function generateSummaries(docs: Document[]) {
   console.log(`📝 Processing ${docs.length} files...`)
 
-  // Split into source (needs AI) vs config (instant)
+  const readmeDocs: Document[] = []
   const sourceDocs: Document[] = []
   const configDocs: Document[] = []
 
   for (const doc of docs) {
     const fileName = doc.metadata.source ?? ''
     if (shouldSkipFile(fileName, doc.pageContent)) continue
-    if (SOURCE_EXT.test(fileName)) {
+    if (README_PATTERN.test(fileName)) {
+      readmeDocs.push(doc)        // README — always indexed with full content as summary
+    } else if (SOURCE_EXT.test(fileName)) {
       sourceDocs.push(doc)
     } else {
       configDocs.push(doc)
     }
   }
 
-  console.log(`   🔵 Source files (AI summary): ${sourceDocs.length}`)
-  console.log(`   ⚪ Config files (instant):    ${configDocs.length}`)
+  console.log(`   📖 README files:      ${readmeDocs.length}`)
+  console.log(`   🔵 Source files (AI): ${sourceDocs.length}`)
+  console.log(`   ⚪ Config files:      ${configDocs.length}`)
 
-  // Config files — no AI, instant
+  // README — use raw content as the summary so Q&A always has project context
+  // (project description, algorithms used, architecture — exactly what Q&A needs)
+  const readmeResults = readmeDocs.map((doc) => {
+    const clean = sanitize(doc.pageContent)
+    return {
+      summary: clean.slice(0, 1500),
+      sourceCode: clean.slice(0, 20000),
+      fileName: doc.metadata.source ?? '',
+    }
+  })
+
+  // Config files — instant generic label
   const configResults = configDocs.map((doc) => ({
     summary: autoSummary(doc.metadata.source ?? ''),
     sourceCode: sanitize(doc.pageContent).slice(0, 20000),
     fileName: doc.metadata.source ?? '',
   }))
 
-  // Source files — AI summaries in parallel batches of 20
+  // Source files — AI summary with fallback so rate-limits never drop a file
   const BATCH_SIZE = 20
   const sourceResults: Array<{ summary: string; sourceCode: string; fileName: string }> = []
 
@@ -265,27 +306,43 @@ async function generateSummaries(docs: Document[]) {
 
     const batchResults = await Promise.all(
       batch.map(async (doc) => {
+        const clean = sanitize(doc.pageContent)
+        const fileName = doc.metadata.source ?? ''
+
+        // For Jupyter notebooks, work with extracted Python code throughout —
+        // raw JSON wastes both the AI context window AND the stored sourceCode field
+        const isNotebook = NOTEBOOK_EXT.test(fileName)
+        const extractedCode = isNotebook ? extractNotebookCode(clean) : null
+        const codeSnippet = extractedCode ?? clean.slice(0, 5000)
+        const codeToStore = extractedCode
+          ? extractedCode.slice(0, 20000)
+          : clean.slice(0, 20000)
+
         try {
-          const clean = sanitize(doc.pageContent)
-          const code = clean.slice(0, 5000)
-          const summary = await summarizeCode(code, doc.metadata.source ?? '')
-          if (!summary) return null
+          const aiSummary = await summarizeCode(codeSnippet, fileName)
+
+          // if AI returned empty (rate-limit / quota) use fallback — never drop the file
           return {
-            summary,
-            sourceCode: clean.slice(0, 20000),
-            fileName: doc.metadata.source ?? '',
+            summary: aiSummary || fallbackSummary(fileName, codeSnippet),
+            sourceCode: codeToStore,
+            fileName,
           }
         } catch {
-          return null
+          // exception during summarization — still index with fallback, never drop
+          return {
+            summary: fallbackSummary(fileName, codeSnippet),
+            sourceCode: codeToStore,
+            fileName,
+          }
         }
       })
     )
 
-    sourceResults.push(...(batchResults.filter(Boolean) as typeof sourceResults))
+    sourceResults.push(...batchResults)
   }
 
-  const all = [...sourceResults, ...configResults]
-  console.log(`✅ Indexed ${all.length} files (${sourceResults.length} with AI summaries, ${configResults.length} config)`)
+  const all = [...readmeResults, ...sourceResults, ...configResults]
+  console.log(`✅ Indexed ${all.length} files (${readmeResults.length} README, ${sourceResults.length} source, ${configResults.length} config)`)
   return all
 }
 

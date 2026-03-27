@@ -98,7 +98,7 @@ export default function QAPage() {
 
       {/* Answer Sheet */}
       <Sheet open={!!selected} onOpenChange={(open) => { if (!open) setSelected(null) }}>
-        <SheetContent className="sm:max-w-xl overflow-y-auto">
+        <SheetContent className="sm:max-w-xl overflow-y-auto overflow-x-hidden">
           <SheetHeader className="text-left">
             <SheetTitle>{selected?.question}</SheetTitle>
           </SheetHeader>

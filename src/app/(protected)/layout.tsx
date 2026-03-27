@@ -9,7 +9,7 @@ export default function ProtectedLayout({
   return (
     <SidebarProvider>
       <AppSidebar />
-      <main className="flex-1 min-h-screen bg-gray-50">
+      <main className="flex-1 min-h-screen bg-gray-50 overflow-x-hidden">
         <div className="flex items-center gap-2 p-2 border-b bg-white sticky top-0 z-10">
           <SidebarTrigger />
         </div>

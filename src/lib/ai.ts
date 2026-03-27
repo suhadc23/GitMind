@@ -231,6 +231,89 @@ Do not include parts of the example in your summary.`,
   }
 }
 
+// Code quality AI analysis for the Code Health dashboard
+export interface CodeQualityAnalysis {
+  errorHandlingScore: number
+  duplicationScore: number
+  documentationScore: number
+  insights: string
+}
+
+export const analyzeCodeQuality = async (
+  summaries: string[],
+  sampleCode: string[],
+): Promise<CodeQualityAnalysis> => {
+  const summaryText = summaries.slice(0, 20).join('\n---\n')
+  const codeText = sampleCode
+    .slice(0, 5)
+    .join('\n---\n')
+    .slice(0, 8000)
+
+  const prompt = `You are a senior software engineer performing a code quality review.
+
+FILE SUMMARIES (what each file does):
+${summaryText}
+
+SAMPLE CODE (up to 5 files):
+${codeText}
+
+Analyze this codebase and return ONLY valid JSON with these exact fields:
+{
+  "errorHandlingScore": <integer 0-100, where 100 = excellent error handling throughout the codebase>,
+  "duplicationScore": <integer 0-100, where 100 = no code duplication detected>,
+  "documentationScore": <integer 0-100, where 100 = well documented with clear comments and JSDoc>,
+  "insights": "<2-3 sentences summarizing the overall code quality. Mention specific strengths and the most important area to improve.>"
+}
+
+Be honest and critical. Base errorHandlingScore on patterns in the sample code. Base duplicationScore on repeated patterns visible in summaries. Base documentationScore on comment clarity.`
+
+  const defaults: CodeQualityAnalysis = {
+    errorHandlingScore: 50,
+    duplicationScore: 50,
+    documentationScore: 50,
+    insights: 'AI analysis unavailable at this time.',
+  }
+
+  try {
+    if (process.env.GROQ_API_KEY) {
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.2,
+        max_tokens: 400,
+        response_format: { type: 'json_object' },
+      })
+      const text = completion.choices[0]?.message?.content ?? '{}'
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      return {
+        errorHandlingScore: Math.min(100, Math.max(0, Number(parsed.errorHandlingScore) || 50)),
+        duplicationScore: Math.min(100, Math.max(0, Number(parsed.duplicationScore) || 50)),
+        documentationScore: Math.min(100, Math.max(0, Number(parsed.documentationScore) || 50)),
+        insights: String(parsed.insights || defaults.insights),
+      }
+    }
+
+    if (process.env.GEMINI_API_KEY) {
+      const response = await geminiModel.generateContent(prompt)
+      const text = response.response.text()
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+        return {
+          errorHandlingScore: Math.min(100, Math.max(0, Number(parsed.errorHandlingScore) || 50)),
+          duplicationScore: Math.min(100, Math.max(0, Number(parsed.duplicationScore) || 50)),
+          documentationScore: Math.min(100, Math.max(0, Number(parsed.documentationScore) || 50)),
+          insights: String(parsed.insights || defaults.insights),
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error analyzing code quality:', error)
+  }
+
+  return defaults
+}
+
 // Generate embeddings (Gemini only for now)
 export const generateEmbedding = async (summary: string) => {
   try {

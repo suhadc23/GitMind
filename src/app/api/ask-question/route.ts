@@ -9,14 +9,14 @@ const groq = createGroq({
 })
 
 const STOP_WORDS = new Set([
-  'a','an','the','is','are','was','were','be','been','being','have','has','had',
-  'do','does','did','will','would','could','should','may','might','can',
-  'what','which','who','when','where','why','how','this','that','these','those',
-  'i','me','my','we','our','you','your','he','she','they','them','it','its',
-  'for','from','in','into','of','on','or','and','to','at','by','with','about',
-  'not','no','so','very','just','get','give','show','tell','find','use','make',
-  'all','some','any','each','every','more','most','other','same','than','too',
-  'explain','describe','want','know','think','see','look','also',
+  'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had',
+  'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can',
+  'what', 'which', 'who', 'when', 'where', 'why', 'how', 'this', 'that', 'these', 'those',
+  'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'they', 'them', 'it', 'its',
+  'for', 'from', 'in', 'into', 'of', 'on', 'or', 'and', 'to', 'at', 'by', 'with', 'about',
+  'not', 'no', 'so', 'very', 'just', 'get', 'give', 'show', 'tell', 'find', 'use', 'make',
+  'all', 'some', 'any', 'each', 'every', 'more', 'most', 'other', 'same', 'than', 'too',
+  'explain', 'describe', 'want', 'know', 'think', 'see', 'look', 'also',
 ])
 
 function extractKeywords(question: string): string[] {
@@ -73,22 +73,50 @@ export async function POST(req: NextRequest) {
     { sourceCode: { contains: kw, mode: 'insensitive' as const } },
   ])
 
-  const sourceCodeEmbeddings =
-    orConditions.length > 0
+  // Always fetch README first — it contains project description, algorithms, architecture.
+  // Include it in context regardless of keyword match so AI always knows what the project is.
+  const readmeFiles = await db.sourceCodeEmbedding.findMany({
+    where: {
+      projectId: { in: projectIds },
+      fileName: { contains: 'readme', mode: 'insensitive' },
+    },
+    take: projectIds.length,
+  })
+  const readmeIds = new Set(readmeFiles.map((r) => r.id))
+
+  // Keyword-matched files ranked by number of keyword hits (most relevant first)
+  let rankedMatches: typeof readmeFiles = []
+  if (orConditions.length > 0) {
+    const allMatches = await db.sourceCodeEmbedding.findMany({
+      where: { projectId: { in: projectIds }, OR: orConditions },
+    })
+
+    rankedMatches = allMatches
+      .filter((e) => !readmeIds.has(e.id)) // README already included above
+      .map((e) => ({
+        ...e,
+        _hits: keywords.reduce((s, kw) => {
+          const hay = `${e.fileName} ${e.summary} ${e.sourceCode}`.toLowerCase()
+          return s + (hay.includes(kw) ? 1 : 0)
+        }, 0),
+      }))
+      .sort((a, b) => b._hits - a._hits)
+      .slice(0, 10 - readmeFiles.length)
+  }
+
+  // Fallback: if nothing keyword-matched, grab a few files so AI has some context
+  const fallbackFiles =
+    rankedMatches.length === 0
       ? await db.sourceCodeEmbedding.findMany({
-          where: { projectId: { in: projectIds }, OR: orConditions },
-          take: 10,
-        })
+        where: {
+          projectId: { in: projectIds },
+          id: { notIn: [...readmeIds] },
+        },
+        take: 5,
+      })
       : []
 
-  // Only fall back to random files if truly no keywords extracted
-  const embeddings =
-    sourceCodeEmbeddings.length > 0
-      ? sourceCodeEmbeddings
-      : await db.sourceCodeEmbedding.findMany({
-          where: { projectId: { in: projectIds } },
-          take: 5,
-        })
+  const embeddings = [...readmeFiles, ...rankedMatches, ...fallbackFiles].slice(0, 10)
 
   // Build context — include project name when in all-projects mode
   const context = embeddings

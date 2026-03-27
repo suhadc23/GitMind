@@ -3,6 +3,8 @@ import { createTRPCRouter, protectedProcedure } from '../trpc'
 import { indexGithubRepo } from '@/lib/github-loader'
 import { checkCredits } from '@/lib/github-loader'
 import { TRPCError } from '@trpc/server'
+import { analyzeFile, computeCleanlinessScore, computeOrganizationScore } from '@/lib/code-analyzer'
+import { analyzeCodeQuality } from '@/lib/ai'
 
 export const projectRouter = createTRPCRouter({
   createProject: protectedProcedure
@@ -255,5 +257,137 @@ export const projectRouter = createTRPCRouter({
         data: { userId: ctx.userId, projectId: input.projectId },
       })
       return { alreadyMember: false }
+    }),
+
+  getHealthReport: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.db.codeHealthReport.findUnique({
+        where: { projectId: input.projectId },
+      })
+    }),
+
+  runHealthAnalysis: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Verify user has access to this project
+      const project = await ctx.db.project.findFirst({
+        where: {
+          id: input.projectId,
+          userToProjects: { some: { userId: ctx.userId } },
+          deletedAt: null,
+        },
+      })
+      if (!project) throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' })
+
+      // Fetch all indexed source code
+      const embeddings = await ctx.db.sourceCodeEmbedding.findMany({
+        where: { projectId: input.projectId },
+      })
+
+      if (embeddings.length === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'No indexed files found. Please index the repository first.',
+        })
+      }
+
+      // Create/reset the report to PROCESSING
+      await ctx.db.codeHealthReport.upsert({
+        where: { projectId: input.projectId },
+        create: {
+          projectId: input.projectId,
+          overallScore: 0,
+          cleanlinessScore: 0,
+          organizationScore: 0,
+          errorHandlingScore: 0,
+          duplicationScore: 0,
+          documentationScore: 0,
+          todoCount: 0,
+          fixmeCount: 0,
+          consoleLogs: 0,
+          largeFileCount: 0,
+          totalFilesAnalyzed: embeddings.length,
+          fileDetails: [],
+          aiInsights: '',
+          status: 'PROCESSING',
+        },
+        update: { status: 'PROCESSING' },
+      })
+
+      try {
+        // --- Static analysis (instant, no AI needed) ---
+        const analyses = embeddings.map((e) => analyzeFile(e.fileName, e.sourceCode))
+
+        const cleanlinessScore = computeCleanlinessScore(analyses)
+        const organizationScore = computeOrganizationScore(analyses)
+        const todoCount = analyses.reduce((s, a) => s + a.todoCount, 0)
+        const fixmeCount = analyses.reduce((s, a) => s + a.fixmeCount, 0)
+        const consoleLogs = analyses.reduce((s, a) => s + a.consoleLogCount, 0)
+        const largeFileCount = analyses.filter((a) => a.isLargeFile).length
+
+        // --- AI analysis (error handling, duplication, documentation) ---
+        const summaries = embeddings.map((e) => `${e.fileName}: ${e.summary}`)
+        const sampleCode = embeddings
+          .filter((e) => e.sourceCode.length > 100)
+          .slice(0, 5)
+          .map((e) => `// ${e.fileName}\n${e.sourceCode.slice(0, 1500)}`)
+
+        const aiResult = await analyzeCodeQuality(summaries, sampleCode)
+
+        // --- Weighted overall score ---
+        // Cleanliness 25% | Organization 15% | Error Handling 30% | Duplication 20% | Documentation 10%
+        const overallScore = Math.round(
+          cleanlinessScore * 0.25 +
+          organizationScore * 0.15 +
+          aiResult.errorHandlingScore * 0.30 +
+          aiResult.duplicationScore * 0.20 +
+          aiResult.documentationScore * 0.10,
+        )
+
+        // Build file details sorted worst-first
+        const fileDetails = analyses
+          .sort((a, b) => a.score - b.score)
+          .map((a) => ({
+            fileName: a.fileName,
+            score: a.score,
+            lines: a.lines,
+            issues: a.issues,
+            todoCount: a.todoCount,
+            fixmeCount: a.fixmeCount,
+            consoleLogCount: a.consoleLogCount,
+            isLargeFile: a.isLargeFile,
+            hasErrorHandling: a.hasErrorHandling,
+          }))
+
+        return ctx.db.codeHealthReport.update({
+          where: { projectId: input.projectId },
+          data: {
+            overallScore,
+            cleanlinessScore,
+            organizationScore,
+            errorHandlingScore: aiResult.errorHandlingScore,
+            duplicationScore: aiResult.duplicationScore,
+            documentationScore: aiResult.documentationScore,
+            todoCount,
+            fixmeCount,
+            consoleLogs,
+            largeFileCount,
+            totalFilesAnalyzed: analyses.length,
+            fileDetails,
+            aiInsights: aiResult.insights,
+            status: 'COMPLETED',
+          },
+        })
+      } catch (error) {
+        await ctx.db.codeHealthReport.update({
+          where: { projectId: input.projectId },
+          data: { status: 'FAILED' },
+        })
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Analysis failed. Please try again.',
+        })
+      }
     }),
 })
