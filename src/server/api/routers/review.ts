@@ -231,10 +231,27 @@ export const reviewRouter = createTRPCRouter({
       })
     )
     .mutation(async ({ ctx, input }) => {
-      // Update the reviewer's status
-      const reviewer = await ctx.db.reviewer.update({
+      // Verify user is a project member
+      const pr = await ctx.db.pullRequest.findUnique({
+        where: { id: input.pullRequestId },
+        select: { projectId: true },
+      })
+      if (!pr) throw new TRPCError({ code: 'NOT_FOUND', message: 'Pull request not found' })
+
+      const membership = await ctx.db.userToProject.findUnique({
+        where: { userId_projectId: { userId: ctx.userId, projectId: pr.projectId } },
+      })
+      if (!membership) throw new TRPCError({ code: 'FORBIDDEN', message: 'Not a project member' })
+
+      // Auto-assign as reviewer if not already assigned
+      const reviewer = await ctx.db.reviewer.upsert({
         where: { pullRequestId_userId: { pullRequestId: input.pullRequestId, userId: ctx.userId } },
-        data: { status: input.status },
+        create: {
+          pullRequestId: input.pullRequestId,
+          userId: ctx.userId,
+          status: input.status,
+        },
+        update: { status: input.status },
       })
 
       // Recalculate overall PR status

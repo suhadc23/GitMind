@@ -316,36 +316,94 @@ export default function KnowledgeGraphPage() {
 
   return (
     <div className="h-[calc(100vh-4rem)] flex flex-col">
-      {/* Toolbar */}
-      <div className="border-b px-4 py-2.5 flex items-center justify-between bg-background shrink-0">
-        <div className="flex items-center gap-3">
-          <h1 className="text-lg font-bold flex items-center gap-2">
-            <Network className="h-5 w-5 text-emerald-500" />
-            Knowledge Graph
-          </h1>
+      {/* Header row */}
+      <div className="border-b bg-background shrink-0">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600">
+              <Network className="h-4.5 w-4.5 text-white" />
+            </div>
+            <div>
+              <h1 className="text-lg font-bold leading-tight">Knowledge Graph</h1>
+              <p className="text-xs text-muted-foreground">Visualize codebase architecture and dependencies</p>
+            </div>
+          </div>
 
-          {graphStatus?.status === 'COMPLETED' && (
-            <Badge variant="secondary" className="font-mono text-xs">
-              {graphStatus.nodesCount} nodes · {graphStatus.edgesCount} edges
-            </Badge>
-          )}
+          <div className="flex items-center gap-3">
+            {/* Repo selector */}
+            {projects && projects.length > 0 && (
+              <Select value={projectId} onValueChange={setProjectId}>
+                <SelectTrigger className="h-9 w-52 text-sm bg-muted/40">
+                  <div className="flex items-center gap-2 truncate">
+                    <div className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" />
+                    <SelectValue placeholder="Select repository..." />
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      <span className="flex items-center gap-2">
+                        <div className="h-2 w-2 rounded-full bg-emerald-500" />
+                        {p.name}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+
+            {graphStatus?.status === 'COMPLETED' && (
+              <Badge variant="secondary" className="font-mono text-xs">
+                {graphStatus.nodesCount} nodes · {graphStatus.edgesCount} edges
+              </Badge>
+            )}
+
+            <Button
+              size="sm"
+              onClick={handleBuild}
+              disabled={buildGraph.isPending || graphStatus?.status === 'BUILDING'}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            >
+              {graphStatus?.status === 'BUILDING' ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                  Building ({graphStatus.progress}%)
+                </>
+              ) : graphStatus?.status === 'COMPLETED' ? (
+                <>
+                  <RefreshCw className="h-4 w-4 mr-1" />
+                  Rebuild
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4 mr-1" />
+                  Build Graph
+                </>
+              )}
+            </Button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          {graphStatus?.status === 'COMPLETED' && (
-            <>
+        {/* Controls row — only when graph is built */}
+        {graphStatus?.status === 'COMPLETED' && (
+          <div className="px-4 py-2 border-t bg-muted/30 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              {/* Search */}
               <div className="relative">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
                 <Input
                   placeholder="Search nodes..."
-                  className="pl-8 h-8 w-44 text-sm"
+                  className="pl-8 h-8 w-44 text-sm bg-background"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                 />
               </div>
 
+              <div className="w-px h-5 bg-border" />
+
+              {/* Filters */}
               <Select value={selectedLayer} onValueChange={setSelectedLayer}>
-                <SelectTrigger className="h-8 w-28 text-sm">
+                <SelectTrigger className="h-8 w-28 text-xs bg-background">
                   <SelectValue placeholder="Layer" />
                 </SelectTrigger>
                 <SelectContent>
@@ -357,7 +415,7 @@ export default function KnowledgeGraphPage() {
               </Select>
 
               <Select value={selectedType} onValueChange={setSelectedType}>
-                <SelectTrigger className="h-8 w-28 text-sm">
+                <SelectTrigger className="h-8 w-28 text-xs bg-background">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
                 <SelectContent>
@@ -368,7 +426,7 @@ export default function KnowledgeGraphPage() {
                 </SelectContent>
               </Select>
 
-              <div className="w-px h-6 bg-border" />
+              <div className="w-px h-5 bg-border" />
 
               <Button
                 size="sm"
@@ -379,57 +437,33 @@ export default function KnowledgeGraphPage() {
                 <AlertTriangle className="h-3 w-3 mr-1" />
                 Dead Code {deadCodeNodes ? `(${deadCodeNodes.length})` : ''}
               </Button>
+            </div>
 
-              <div className="w-px h-6 bg-border" />
-
-              {/* Zoom controls */}
-              <div className="flex items-center bg-muted/50 rounded-md">
-                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-r-none" onClick={() => {
+            {/* Zoom controls */}
+            <div className="flex items-center gap-1">
+              <div className="flex items-center bg-background border rounded-md">
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-r-none" onClick={() => {
                   const newZoom = Math.max(0.1, zoom * 0.8)
                   setPan(p => ({ x: p.x * (newZoom / zoom), y: p.y * (newZoom / zoom) }))
                   setZoom(newZoom)
                 }}>
-                  <ZoomOut className="h-3.5 w-3.5" />
+                  <ZoomOut className="h-3 w-3" />
                 </Button>
-                <span className="text-xs font-mono w-12 text-center tabular-nums">{Math.round(zoom * 100)}%</span>
-                <Button size="sm" variant="ghost" className="h-8 w-8 p-0 rounded-l-none" onClick={() => {
+                <span className="text-xs font-mono w-10 text-center tabular-nums border-x">{Math.round(zoom * 100)}%</span>
+                <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-l-none" onClick={() => {
                   const newZoom = Math.min(4, zoom * 1.25)
                   setPan(p => ({ x: p.x * (newZoom / zoom), y: p.y * (newZoom / zoom) }))
                   setZoom(newZoom)
                 }}>
-                  <ZoomIn className="h-3.5 w-3.5" />
+                  <ZoomIn className="h-3 w-3" />
                 </Button>
               </div>
-              <Button size="sm" variant="ghost" className="h-8 w-8 p-0" onClick={fitToView} title="Fit to view">
-                <Maximize2 className="h-3.5 w-3.5" />
+              <Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={fitToView} title="Fit to view">
+                <Maximize2 className="h-3 w-3" />
               </Button>
-            </>
-          )}
-
-          <Button
-            size="sm"
-            onClick={handleBuild}
-            disabled={buildGraph.isPending || graphStatus?.status === 'BUILDING'}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white"
-          >
-            {graphStatus?.status === 'BUILDING' ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                Building ({graphStatus.progress}%)
-              </>
-            ) : graphStatus?.status === 'COMPLETED' ? (
-              <>
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Rebuild
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4 mr-1" />
-                Build Graph
-              </>
-            )}
-          </Button>
-        </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main canvas area */}
@@ -521,11 +555,6 @@ export default function KnowledgeGraphPage() {
 
                   {/* Layer labels */}
                   {(() => {
-                    const layerOrder = ['API', 'UI', 'LIB', 'DB', 'CONFIG', 'OTHER']
-                    const layerYs = new Map<string, number>()
-                    for (const [, pos] of positions) {
-                      // Find which layer each Y belongs to
-                    }
                     const rendered = new Set<number>()
                     return graphData.nodes.map((node) => {
                       const pos = positions.get(node.id)

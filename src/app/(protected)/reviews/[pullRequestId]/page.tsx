@@ -141,8 +141,9 @@ export default function PRReviewPage() {
     try {
       await submitReview.mutateAsync({ pullRequestId, status })
       toast.success(status === 'APPROVED' ? 'PR approved!' : 'Changes requested')
-    } catch {
-      toast.error('Failed to submit review. Are you assigned as a reviewer?')
+      utils.review.getPullRequest.invalidate({ pullRequestId })
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to submit review')
     }
   }
 
