@@ -25,7 +25,6 @@ export async function POST(req: NextRequest) {
         authorization: apiKey,
         'Content-Type': 'application/octet-stream',
       },
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       body: nodeBuffer as any,
     })
 

@@ -182,7 +182,7 @@ export default function HealthPage() {
             <div className="text-center">
               <p className="font-semibold text-gray-700">No project selected</p>
               <p className="text-sm text-gray-500 mt-1">
-                Use the <span className="font-medium text-gray-700">"Analyzing"</span> dropdown above to pick a project
+                Use the <span className="font-medium text-gray-700">&quot;Analyzing&quot;</span> dropdown above to pick a project
               </p>
             </div>
           </CardContent>
@@ -200,7 +200,7 @@ export default function HealthPage() {
             <div className="text-center">
               <p className="font-semibold text-gray-700">No analysis run yet</p>
               <p className="text-sm text-gray-500 mt-1">
-                Click "Run Analysis" to scan your indexed files and get a health score
+                Click &quot;Run Analysis&quot; to scan your indexed files and get a health score
               </p>
             </div>
             <Button

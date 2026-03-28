@@ -224,6 +224,60 @@ export const projectRouter = createTRPCRouter({
     })
   }),
 
+  verifyPayment: protectedProcedure
+    .input(z.object({ sessionId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      // Check if this session was already processed
+      const existing = await ctx.db.stripeTransaction.findUnique({
+        where: { stripeSessionId: input.sessionId },
+      })
+      if (existing) {
+        return { status: 'already_processed' as const, credits: existing.credits }
+      }
+
+      // Verify the session with Stripe
+      if (!process.env.STRIPE_SECRET_KEY) {
+        throw new TRPCError({ code: 'INTERNAL_SERVER_ERROR', message: 'Stripe not configured' })
+      }
+
+      const Stripe = (await import('stripe')).default
+      const stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+        apiVersion: '2026-01-28.clover',
+      })
+
+      const session = await stripe.checkout.sessions.retrieve(input.sessionId)
+
+      if (session.payment_status !== 'paid') {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Payment not completed' })
+      }
+
+      const sessionUserId = session.metadata?.userId
+      if (sessionUserId !== ctx.userId) {
+        throw new TRPCError({ code: 'FORBIDDEN', message: 'Session does not belong to this user' })
+      }
+
+      const credits = parseInt(session.metadata?.credits ?? '0')
+      if (credits <= 0) {
+        throw new TRPCError({ code: 'BAD_REQUEST', message: 'Invalid credits amount' })
+      }
+
+      // Apply credits and record transaction
+      await ctx.db.user.update({
+        where: { id: ctx.userId },
+        data: { credits: { increment: credits } },
+      })
+
+      await ctx.db.stripeTransaction.create({
+        data: {
+          userId: ctx.userId,
+          credits,
+          stripeSessionId: input.sessionId,
+        },
+      })
+
+      return { status: 'success' as const, credits }
+    }),
+
   getProjectById: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .query(async ({ ctx, input }) => {

@@ -54,7 +54,7 @@ export default function JoinPage({
             </div>
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-900">You've been invited!</h1>
+            <h1 className="text-xl font-bold text-gray-900">You&apos;ve been invited!</h1>
             <p className="text-sm text-muted-foreground mt-1">
               Sign in to accept your invitation and join the project.
             </p>
@@ -107,7 +107,7 @@ export default function JoinPage({
         </div>
 
         <div className="text-center space-y-1">
-          <p className="text-sm text-muted-foreground">You've been invited to join</p>
+          <p className="text-sm text-muted-foreground">You&apos;ve been invited to join</p>
           <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
           <a
             href={project.githubUrl}

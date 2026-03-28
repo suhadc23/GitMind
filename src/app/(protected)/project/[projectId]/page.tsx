@@ -133,7 +133,6 @@ export default function ProjectDetailPage() {
     await ffmpeg.exec(['-i', inputName, '-vn', '-ar', '44100', '-ac', '2', '-b:a', '128k', outputName])
 
     const data = await ffmpeg.readFile(outputName)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const audioBlob = new Blob([data as any], { type: 'audio/mpeg' })
     const baseName = file.name.substring(0, file.name.lastIndexOf('.')) || file.name
     return new File([audioBlob], `${baseName}.mp3`, { type: 'audio/mpeg' })

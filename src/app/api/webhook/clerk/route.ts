@@ -57,6 +57,7 @@ export async function POST(req: Request) {
       await db.user.create({
         data: {
           id: id,
+          clerkId: id,
           emailAddress: email,
           firstName: first_name || null,
           lastName: last_name || null,

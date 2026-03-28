@@ -111,7 +111,6 @@ export async function POST(
       message: 'Repository indexed successfully!',
       indexed: result.indexed,
       total: result.total,
-      limited: result.limited,
       creditsUsed: creditsNeeded,
       remainingCredits: user.credits - creditsNeeded,
     })
