@@ -314,6 +314,66 @@ Be honest and critical. Base errorHandlingScore on patterns in the sample code. 
   return defaults
 }
 
+// Security AI analysis for the Security Scan dashboard
+export interface SecurityAIAnalysis {
+  insights: string
+}
+
+export const analyzeSecurityFindings = async (
+  findingsSummary: string[],
+  sampleFindings: string[],
+): Promise<SecurityAIAnalysis> => {
+  const findingsText = findingsSummary.slice(0, 30).join('\n')
+  const samplesText = sampleFindings.slice(0, 10).join('\n---\n').slice(0, 4000)
+
+  const prompt = `You are a senior application security engineer reviewing a codebase scan report.
+
+DETECTED SECURITY ISSUES:
+${findingsText}
+
+SAMPLE FINDINGS (raw snippets):
+${samplesText}
+
+Based on these findings, write a concise security assessment (2-4 sentences). Mention:
+1. The most critical risk and why it matters
+2. The most common issue pattern across the codebase
+3. One specific, actionable fix recommendation
+
+Return ONLY valid JSON:
+{ "insights": "<your assessment here>" }`
+
+  const defaults: SecurityAIAnalysis = { insights: 'AI security analysis unavailable at this time.' }
+
+  try {
+    if (process.env.GROQ_API_KEY) {
+      const completion = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: prompt }],
+        model: 'llama-3.3-70b-versatile',
+        temperature: 0.2,
+        max_tokens: 300,
+        response_format: { type: 'json_object' },
+      })
+      const text = completion.choices[0]?.message?.content ?? '{}'
+      const parsed = JSON.parse(text) as Record<string, unknown>
+      return { insights: String(parsed.insights || defaults.insights) }
+    }
+
+    if (process.env.GEMINI_API_KEY) {
+      const response = await geminiModel.generateContent(prompt)
+      const text = response.response.text()
+      const jsonMatch = text.match(/\{[\s\S]*\}/)
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>
+        return { insights: String(parsed.insights || defaults.insights) }
+      }
+    }
+  } catch (error) {
+    console.error('Error analyzing security findings:', error)
+  }
+
+  return defaults
+}
+
 // Generate embeddings (Gemini only for now)
 export const generateEmbedding = async (summary: string) => {
   try {

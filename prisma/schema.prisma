@@ -34,6 +34,7 @@ model Project {
   sourceCodeEmbeddings SourceCodeEmbedding[]
   userToProjects       UserToProject[]
   codeHealthReport     CodeHealthReport?
+  securityScanReport   SecurityScanReport?
 }
 
 model UserToProject {
@@ -53,6 +54,7 @@ model SourceCodeEmbedding {
   sourceCode String   @db.Text
   fileName   String
   summary    String   @db.Text
+  fileSha    String?
   projectId  String
   project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
 }
@@ -146,6 +148,29 @@ model CodeHealthReport {
 }
 
 enum HealthReportStatus {
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+model SecurityScanReport {
+  id               String             @id @default(cuid())
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  projectId        String             @unique
+  project          Project            @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  overallScore     Int
+  criticalCount    Int
+  highCount        Int
+  mediumCount      Int
+  totalIssues      Int
+  totalFilesScanned Int
+  topFindings      Json
+  aiInsights       String             @db.Text
+  status           SecurityScanStatus @default(PROCESSING)
+}
+
+enum SecurityScanStatus {
   PROCESSING
   COMPLETED
   FAILED
