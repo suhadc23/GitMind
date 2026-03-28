@@ -346,6 +346,164 @@ async function generateSummaries(docs: Document[]) {
   return all
 }
 
+// ─── Smart incremental re-index ──────────────────────────────────────────────
+// Diffs the current GitHub tree against what's already in the DB using blob
+// SHAs so only new / changed files are re-summarised — unchanged files are
+// left exactly as-is, saving AI quota.
+
+export interface ReIndexResult {
+  added: number
+  updated: number
+  removed: number
+  unchanged: number
+  total: number
+}
+
+export async function smartReIndexGithubRepo(
+  projectId: string,
+  githubUrl: string,
+  githubToken?: string,
+): Promise<ReIndexResult> {
+  const normalizedUrl = githubUrl.replace(/\.git$/, '')
+  console.log('🔄 Smart re-index for project:', projectId)
+
+  const { owner, repo } = parseGithubUrl(normalizedUrl)
+  const octokit = new Octokit({ auth: githubToken || process.env.GITHUB_TOKEN })
+
+  const branch = await detectDefaultBranch(normalizedUrl, githubToken)
+
+  // 1 — Fetch current tree from GitHub (with blob SHAs)
+  const { data: treeData } = await octokit.rest.git.getTree({
+    owner, repo, tree_sha: branch, recursive: '1',
+  })
+
+  const candidates = treeData.tree.filter((item) => {
+    if (item.type !== 'blob') return false
+    const path = item.path ?? ''
+    if (SKIP_PATHS.test(`/${path}/`)) return false
+    if (SKIP_FILE_NAMES.test(path.split('/').pop() ?? '')) return false
+    if ((item.size ?? 0) > 100000) return false
+    if (SOURCE_EXT.test(path)) return true
+    if (/\.(json|yaml|yml|md|txt|env|toml|ini|cfg|html|css|scss|less)$/i.test(path)) return true
+    return false
+  })
+
+  // 2 — Load existing DB records (just id / fileName / fileSha)
+  const existing = await db.sourceCodeEmbedding.findMany({
+    where: { projectId },
+    select: { id: true, fileName: true, fileSha: true },
+  })
+
+  const dbByFileName = new Map(existing.map((e) => [e.fileName, e]))
+  const githubByFileName = new Map(candidates.map((c) => [c.path!, c]))
+
+  // 3 — Compute diff
+  const toAdd    = candidates.filter((c) => !dbByFileName.has(c.path!))
+  const toUpdate = candidates.filter((c) => {
+    const row = dbByFileName.get(c.path!)
+    return row && row.fileSha !== c.sha   // same file, different SHA → changed
+  })
+  const toDelete = existing.filter((e) => !githubByFileName.has(e.fileName))
+  const unchanged = candidates.length - toAdd.length - toUpdate.length
+
+  console.log(`📊 Diff — add:${toAdd.length} update:${toUpdate.length} remove:${toDelete.length} skip:${unchanged}`)
+
+  // 4 — Fetch content for new + changed files
+  async function fetchContent(path: string) {
+    const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref: branch })
+    if ('content' in data && data.encoding === 'base64') {
+      return Buffer.from(data.content, 'base64').toString('utf8')
+    }
+    return null
+  }
+
+  const CONCURRENCY = 20
+  async function fetchBatch(items: typeof candidates) {
+    const docs: Document[] = []
+    for (let i = 0; i < items.length; i += CONCURRENCY) {
+      const batch = items.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(
+        batch.map(async (item) => {
+          const content = await fetchContent(item.path!)
+          if (!content) return null
+          return new Document({ pageContent: content, metadata: { source: item.path, sha: item.sha } })
+        })
+      )
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value) docs.push(r.value)
+      }
+    }
+    return docs
+  }
+
+  const [addDocs, updateDocs] = await Promise.all([
+    fetchBatch(toAdd),
+    fetchBatch(toUpdate),
+  ])
+
+  // 5 — Summarise only what's needed
+  async function summariseDocs(docs: Document[]) {
+    if (docs.length === 0) return []
+    return generateSummaries(docs)
+  }
+
+  const [addSummaries, updateSummaries] = await Promise.all([
+    summariseDocs(addDocs),
+    summariseDocs(updateDocs),
+  ])
+
+  // Helper: get SHA from Document metadata
+  function shaFor(summary: { fileName: string }) {
+    const match = [...toAdd, ...toUpdate].find((c) => c.path === summary.fileName)
+    return match?.sha ?? null
+  }
+
+  // 6 — Apply changes to DB
+  if (toDelete.length > 0) {
+    await db.sourceCodeEmbedding.deleteMany({
+      where: { id: { in: toDelete.map((e) => e.id) } },
+    })
+    console.log(`🗑️  Removed ${toDelete.length} deleted files`)
+  }
+
+  if (addSummaries.length > 0) {
+    await db.sourceCodeEmbedding.createMany({
+      data: addSummaries.map((s) => ({
+        projectId,
+        fileName: s.fileName,
+        summary: s.summary,
+        sourceCode: s.sourceCode,
+        fileSha: shaFor(s),
+      })),
+    })
+    console.log(`✅ Added ${addSummaries.length} new files`)
+  }
+
+  for (const s of updateSummaries) {
+    const row = dbByFileName.get(s.fileName)
+    if (!row) continue
+    await db.sourceCodeEmbedding.update({
+      where: { id: row.id },
+      data: {
+        summary: s.summary,
+        sourceCode: s.sourceCode,
+        fileSha: shaFor(s),
+      },
+    })
+  }
+  if (updateSummaries.length > 0) {
+    console.log(`✏️  Updated ${updateSummaries.length} changed files`)
+  }
+
+  return {
+    added: addSummaries.length,
+    updated: updateSummaries.length,
+    removed: toDelete.length,
+    unchanged,
+    total: candidates.length,
+  }
+}
+
 // Main indexing function (SIMPLIFIED - No Vector Embeddings)
 export async function indexGithubRepo(
   projectId: string,

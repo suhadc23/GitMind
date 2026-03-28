@@ -36,6 +36,7 @@ import {
   Upload,
   Clock,
   Trash2,
+  RefreshCw,
 } from 'lucide-react'
 
 interface RepoInfo {
@@ -93,6 +94,19 @@ export default function ProjectDetailPage() {
   const [selectedMeeting, setSelectedMeeting] = useState<string | null>(null)
   const [isConverting, setIsConverting] = useState(false)
   const [convertProgress, setConvertProgress] = useState(0)
+
+  const reIndexMutation = api.project.reIndexProject.useMutation({
+    onSuccess: (result) => {
+      const parts: string[] = []
+      if (result.added)     parts.push(`${result.added} new`)
+      if (result.updated)   parts.push(`${result.updated} updated`)
+      if (result.removed)   parts.push(`${result.removed} removed`)
+      if (result.unchanged) parts.push(`${result.unchanged} unchanged`)
+      const detail = parts.length > 0 ? ` — ${parts.join(', ')}` : ''
+      toast.success(`Re-index complete${detail}`)
+    },
+    onError: (err) => toast.error(err.message),
+  })
 
   const uploadMeetingMutation = api.project.uploadMeeting.useMutation()
   const { data: meetings, refetch: refetchMeetings } = api.project.getMeetings.useQuery(
@@ -515,7 +529,17 @@ export default function ProjectDetailPage() {
               )}
             </div>
           </div>
-          {!isIndexed && (
+          {isIndexed ? (
+            <Button
+              onClick={() => reIndexMutation.mutate({ projectId })}
+              disabled={reIndexMutation.isPending}
+              variant="outline"
+              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 shrink-0"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${reIndexMutation.isPending ? 'animate-spin' : ''}`} />
+              {reIndexMutation.isPending ? 'Re-indexing…' : 'Re-index'}
+            </Button>
+          ) : (
             <Button
               onClick={handleIndexRepo}
               disabled={isIndexing}

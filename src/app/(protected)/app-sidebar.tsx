@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Activity, Bot, CreditCard, FileText, FolderKanban, GitBranch, LayoutDashboard, Presentation } from 'lucide-react'
+import { Activity, Bot, CreditCard, FileText, FolderKanban, GitBranch, LayoutDashboard, Presentation, ShieldAlert } from 'lucide-react'
 import { UserButton } from '@clerk/nextjs'
 
 import {
@@ -27,6 +27,7 @@ const items = [
   { title: 'Repo Explorer', url: '/aimodels', icon: GitBranch },
   { title: 'Doc Summarizer', url: '/docsummarizer', icon: FileText },
   { title: 'Code Health', url: '/health', icon: Activity },
+  { title: 'Security Scan', url: '/security', icon: ShieldAlert },
 ]
 
 export function AppSidebar() {
