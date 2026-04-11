@@ -1,6 +1,7 @@
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState, useEffect, useRef } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { api } from '@/trpc/react'
 import { Button } from '@/components/ui/button'
 import { Slider } from '@/components/ui/slider'
@@ -12,11 +13,51 @@ import { createCheckoutSession } from '@/lib/stripe'
 import { toast } from 'sonner'
 
 export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="flex items-center justify-center h-40"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+      <BillingContent />
+    </Suspense>
+  )
+}
+
+function BillingContent() {
   const [credits, setCredits] = useState(100)
   const [isRedirecting, setIsRedirecting] = useState(false)
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const verifiedRef = useRef(false)
 
-  const { data: userCredits, isLoading: creditsLoading } = api.project.getMyCredits.useQuery()
-  const { data: transactions, isLoading: txLoading } = api.project.getMyTransactions.useQuery()
+  const { data: userCredits, isLoading: creditsLoading, refetch: refetchCredits } = api.project.getMyCredits.useQuery()
+  const { data: transactions, isLoading: txLoading, refetch: refetchTransactions } = api.project.getMyTransactions.useQuery()
+  const verifyPayment = api.project.verifyPayment.useMutation()
+
+  // Verify payment when returning from Stripe checkout
+  useEffect(() => {
+    const sessionId = searchParams.get('session_id')
+    const success = searchParams.get('success')
+
+    if (success === 'true' && sessionId && !verifiedRef.current) {
+      verifiedRef.current = true
+      verifyPayment.mutateAsync({ sessionId })
+        .then((result) => {
+          if (result.status === 'success') {
+            toast.success(`Successfully added ${result.credits} credits!`)
+          } else {
+            toast.success('Payment already processed!')
+          }
+          refetchCredits()
+          refetchTransactions()
+          // Clean up URL params
+          router.replace('/billing')
+        })
+        .catch(() => {
+          // Webhook may have already processed it — just refetch
+          refetchCredits()
+          refetchTransactions()
+          router.replace('/billing')
+        })
+    }
+  }, [searchParams])
 
   const price = Math.round((credits / 50) * 100) / 100
 
@@ -24,7 +65,9 @@ export default function BillingPage() {
     setIsRedirecting(true)
     try {
       await createCheckoutSession(credits)
-    } catch (error) {
+    } catch (error: any) {
+      // Next.js redirect() throws a NEXT_REDIRECT error — that's expected, not a failure
+      if (error?.digest?.startsWith('NEXT_REDIRECT')) return
       toast.error(error instanceof Error ? error.message : 'Failed to start checkout. Please try again.')
       setIsRedirecting(false)
     }

@@ -3,6 +3,17 @@ import { createGroq } from '@ai-sdk/groq'
 import { auth } from '@clerk/nextjs/server'
 import { NextRequest } from 'next/server'
 import { db } from '@/server/db'
+import { generateEmbedding } from '@/lib/ai'
+
+function cosine(a: number[], b: number[]): number {
+  let dot = 0, ma = 0, mb = 0
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i]! * b[i]!
+    ma += a[i]! * a[i]!
+    mb += b[i]! * b[i]!
+  }
+  return dot / (Math.sqrt(ma) * Math.sqrt(mb))
+}
 
 const groq = createGroq({
   apiKey: process.env.GROQ_API_KEY ?? '',
@@ -64,59 +75,44 @@ export async function POST(req: NextRequest) {
     return new Response('No projects found', { status: 404 })
   }
 
-  // Extract meaningful keywords — strip stop words so "what is the logic for voice recognition"
-  // becomes ["logic", "voice", "recognition"] instead of matching nothing
-  const keywords = extractKeywords(question)
-  const orConditions = keywords.flatMap((kw) => [
-    { summary: { contains: kw, mode: 'insensitive' as const } },
-    { fileName: { contains: kw, mode: 'insensitive' as const } },
-    { sourceCode: { contains: kw, mode: 'insensitive' as const } },
-  ])
-
-  // Always fetch README first — it contains project description, algorithms, architecture.
-  // Include it in context regardless of keyword match so AI always knows what the project is.
-  const readmeFiles = await db.sourceCodeEmbedding.findMany({
-    where: {
-      projectId: { in: projectIds },
-      fileName: { contains: 'readme', mode: 'insensitive' },
-    },
-    take: projectIds.length,
+  // Load all files for these projects
+  const allFiles = await db.sourceCodeEmbedding.findMany({
+    where: { projectId: { in: projectIds } },
   })
-  const readmeIds = new Set(readmeFiles.map((r) => r.id))
 
-  // Keyword-matched files ranked by number of keyword hits (most relevant first)
-  let rankedMatches: typeof readmeFiles = []
-  if (orConditions.length > 0) {
-    const allMatches = await db.sourceCodeEmbedding.findMany({
-      where: { projectId: { in: projectIds }, OR: orConditions },
+  // Try vector similarity first, fall back to keyword if no embeddings stored yet
+  const questionVector = await generateEmbedding(question)
+  const hasVectors = allFiles.some((f) => Array.isArray(f.embedding) && (f.embedding as number[]).length > 0)
+
+  let embeddings: typeof allFiles
+
+  if (questionVector.length > 0 && hasVectors) {
+    // Vector path — score every file by cosine similarity
+    const scored = allFiles.map((f) => {
+      const vec = Array.isArray(f.embedding) ? (f.embedding as number[]) : []
+      const score = vec.length > 0 ? cosine(questionVector, vec) : 0
+      // README bonus — always floats to top
+      const bonus = /readme/i.test(f.fileName) ? 0.3 : 0
+      return { ...f, _score: score + bonus }
     })
-
-    rankedMatches = allMatches
-      .filter((e) => !readmeIds.has(e.id)) // README already included above
+    embeddings = scored.sort((a, b) => b._score - a._score).slice(0, 15)
+  } else {
+    // Keyword fallback for repos indexed before vectors were added
+    const keywords = extractKeywords(question)
+    const readmeFiles = allFiles.filter((f) => /readme/i.test(f.fileName))
+    const readmeIds = new Set(readmeFiles.map((r) => r.id))
+    const rest = allFiles.filter((f) => !readmeIds.has(f.id))
+    const ranked = rest
       .map((e) => ({
         ...e,
         _hits: keywords.reduce((s, kw) => {
-          const hay = `${e.fileName} ${e.summary} ${e.sourceCode}`.toLowerCase()
+          const hay = `${e.fileName} ${e.summary}`.toLowerCase()
           return s + (hay.includes(kw) ? 1 : 0)
         }, 0),
       }))
       .sort((a, b) => b._hits - a._hits)
-      .slice(0, 10 - readmeFiles.length)
+    embeddings = [...readmeFiles, ...ranked].slice(0, 10)
   }
-
-  // Fallback: if nothing keyword-matched, grab a few files so AI has some context
-  const fallbackFiles =
-    rankedMatches.length === 0
-      ? await db.sourceCodeEmbedding.findMany({
-        where: {
-          projectId: { in: projectIds },
-          id: { notIn: [...readmeIds] },
-        },
-        take: 5,
-      })
-      : []
-
-  const embeddings = [...readmeFiles, ...rankedMatches, ...fallbackFiles].slice(0, 10)
 
   // Build context — include project name when in all-projects mode
   const context = embeddings
@@ -131,15 +127,22 @@ export async function POST(req: NextRequest) {
   const isAllProjects = !projectId && projectIds.length > 1
   const systemPrompt = `You are an AI code assistant helping developers understand their codebase.
 Your target audience is a technical developer.
-You are always friendly, kind, and inspiring, and eager to provide vivid and thoughtful responses.
-If the question is asking about code or a specific file, provide the detailed answer with step-by-step instructions.
 ${isAllProjects ? 'The context below comes from MULTIPLE repositories. When referencing files, always mention which project they belong to.' : ''}
+
+Always format your response using clear Markdown:
+- Use ## or ### headings to organize distinct sections
+- Use bullet points (- item) or numbered lists for steps, options, or multiple items
+- Use \`inline code\` for file names, variable names, function names, and short snippets
+- Use fenced code blocks (\`\`\`language\\n...\\n\`\`\`) for any multi-line code examples
+- Use **bold** for key terms and important points
+- Separate paragraphs and sections with blank lines
+- Never write a long wall of text — always break into structured sections
 
 START CONTEXT BLOCK
 ${context}
 END OF CONTEXT BLOCK
 
-When answering, focus on being accurate and helpful. Reference specific files when relevant.`
+When answering, be accurate and reference specific files when relevant.`
 
   const result = streamText({
     model: groq('llama-3.3-70b-versatile'),

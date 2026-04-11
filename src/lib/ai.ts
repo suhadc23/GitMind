@@ -47,11 +47,19 @@ async function askGroq(question: string, context: string): Promise<string> {
       messages: [
         {
           role: 'system',
-          content: 'You are an AI assistant helping developers understand GitHub repositories. Provide clear, accurate, and concise answers based on the provided context.',
+          content: `You are an AI assistant helping developers understand GitHub repositories.
+Always format your response using clear Markdown:
+- Use ## or ### headings to organize sections
+- Use bullet points (- item) or numbered lists for steps and multiple items
+- Use \`inline code\` for file names, function names, and short code snippets
+- Use fenced code blocks (\`\`\`language) for multi-line code
+- Use **bold** for key terms and important points
+- Add a blank line between paragraphs and sections
+- Never write a wall of text — break ideas into structured sections`,
         },
         {
           role: 'user',
-          content: `REPOSITORY CONTEXT:\n${context}\n\nUSER QUESTION: ${question}\n\nProvide a helpful answer based on the context. If you cannot answer, say so politely.`,
+          content: `REPOSITORY CONTEXT:\n${context}\n\nUSER QUESTION: ${question}\n\nProvide a well-formatted, structured answer based on the context. If you cannot answer, say so politely.`,
         },
       ],
       model: 'llama-3.3-70b-versatile', // Fast and free
@@ -81,15 +89,21 @@ async function askGroq(question: string, context: string): Promise<string> {
 async function askGemini(question: string, context: string): Promise<string> {
   try {
     const prompt = `You are an AI assistant helping developers understand GitHub repositories.
-
-Based on the following repository information, answer the user's question clearly and concisely.
+Always format your response using clear Markdown:
+- Use ## or ### headings to organize sections
+- Use bullet points (- item) or numbered lists for steps and multiple items
+- Use \`inline code\` for file names, function names, and short code snippets
+- Use fenced code blocks (\`\`\`language) for multi-line code
+- Use **bold** for key terms and important points
+- Add a blank line between paragraphs and sections
+- Never write a wall of text — break ideas into structured sections
 
 REPOSITORY CONTEXT:
 ${context}
 
 USER QUESTION: ${question}
 
-Provide a helpful, accurate answer. If you cannot answer based on the provided context, say so politely and suggest what additional information might help.`
+Provide a well-formatted, structured Markdown answer. If you cannot answer based on the provided context, say so politely.`
 
     const response = await geminiModel.generateContent(prompt)
     return response.response.text()
@@ -374,16 +388,31 @@ Return ONLY valid JSON:
   return defaults
 }
 
-// Generate embeddings (Gemini only for now)
-export const generateEmbedding = async (summary: string) => {
+// Generate embeddings via Gemini REST API (bypasses SDK model resolution issues)
+export const generateEmbedding = async (summary: string): Promise<number[]> => {
   try {
     if (!process.env.GEMINI_API_KEY) return []
 
-    const embeddingModel = genAI.getGenerativeModel({
-      model: 'text-embedding-004',
-    })
-    const result = await embeddingModel.embedContent(summary)
-    return result.embedding.values
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'models/text-embedding-004',
+          content: { parts: [{ text: summary.slice(0, 8000) }] },
+        }),
+      }
+    )
+
+    if (!res.ok) {
+      const err = await res.text()
+      console.error('Embedding API error:', res.status, err)
+      return []
+    }
+
+    const data = await res.json() as { embedding?: { values?: number[] } }
+    return data.embedding?.values ?? []
   } catch (error) {
     console.error('Error generating embedding:', error)
     return []

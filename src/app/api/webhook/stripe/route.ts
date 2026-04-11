@@ -33,14 +33,20 @@ export async function POST(req: NextRequest) {
     const credits = parseInt(session.metadata?.credits ?? '0')
 
     if (userId && credits > 0) {
-      await db.user.update({
-        where: { id: userId },
-        data: { credits: { increment: credits } },
+      // Prevent double-crediting: check if this session was already processed
+      const existing = await db.stripeTransaction.findUnique({
+        where: { stripeSessionId: session.id },
       })
+      if (!existing) {
+        await db.user.update({
+          where: { id: userId },
+          data: { credits: { increment: credits } },
+        })
 
-      await db.stripeTransaction.create({
-        data: { userId, credits },
-      })
+        await db.stripeTransaction.create({
+          data: { userId, credits, stripeSessionId: session.id },
+        })
+      }
     }
   }
 

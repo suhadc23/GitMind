@@ -15,6 +15,7 @@ async function getOrCreateUser(clerkId: string) {
     user = await db.user.create({
       data: {
         id: clerkUser.id,
+        clerkId: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,

@@ -35,6 +35,7 @@ async function getOrCreateUser(clerkId: string) {
     user = await db.user.create({
       data: {
         id: clerkUser.id,
+        clerkId: clerkUser.id,
         emailAddress: clerkUser.emailAddresses[0]?.emailAddress ?? '',
         firstName: clerkUser.firstName,
         lastName: clerkUser.lastName,
@@ -73,8 +74,13 @@ async function fetchRepoReadme(githubUrl: string): Promise<string | null> {
   }
 }
 
+type FileReference = { id: string; fileName: string; summary: string; sourceCode: string }
+
 // Fetch indexed code summaries from database — keyword-filtered for relevance
-async function fetchIndexedCode(projectId: string, question: string): Promise<string | null> {
+async function fetchIndexedCode(
+  projectId: string,
+  question: string
+): Promise<{ context: string; files: FileReference[] } | null> {
   try {
     const keywords = extractKeywords(question)
     const orConditions = keywords.flatMap((kw) => [
@@ -87,7 +93,7 @@ async function fetchIndexedCode(projectId: string, question: string): Promise<st
     let embeddings = orConditions.length > 0
       ? await db.sourceCodeEmbedding.findMany({
           where: { projectId, OR: orConditions },
-          select: { fileName: true, summary: true, sourceCode: true },
+          select: { id: true, fileName: true, summary: true, sourceCode: true },
           take: 10,
         })
       : []
@@ -96,7 +102,7 @@ async function fetchIndexedCode(projectId: string, question: string): Promise<st
     if (embeddings.length === 0) {
       embeddings = await db.sourceCodeEmbedding.findMany({
         where: { projectId },
-        select: { fileName: true, summary: true, sourceCode: true },
+        select: { id: true, fileName: true, summary: true, sourceCode: true },
         take: 5,
       })
     }
@@ -110,7 +116,7 @@ async function fetchIndexedCode(projectId: string, question: string): Promise<st
       context += `💻 Code:\n\`\`\`\n${file.sourceCode.slice(0, 6000)}\n\`\`\`\n\n`
     }
 
-    return context
+    return { context, files: embeddings }
   } catch (error) {
     console.error('Error fetching indexed code:', error)
     return null
@@ -188,7 +194,7 @@ export async function POST(
     }
 
     // Fetch repo context - prioritize indexed code over README
-    const [repoInfo, indexedCode, readme] = await Promise.all([
+    const [repoInfo, indexedResult, readme] = await Promise.all([
       fetchRepoInfo(project.githubUrl),
       fetchIndexedCode(projectId, question),
       fetchRepoReadme(project.githubUrl),
@@ -206,8 +212,10 @@ export async function POST(
     }
 
     // Use indexed code if available, otherwise fall back to README
-    if (indexedCode) {
-      context += `\n${indexedCode}\n`
+    const filesReferences: FileReference[] = []
+    if (indexedResult) {
+      context += `\n${indexedResult.context}\n`
+      filesReferences.push(...indexedResult.files)
       console.log('✅ Using indexed code for AI context')
     } else if (readme) {
       // Truncate README if too long
@@ -241,6 +249,7 @@ export async function POST(
       success: true,
       question: savedQuestion.question,
       answer: savedQuestion.answer,
+      filesReferences,
       creditsRemaining: user.credits - 1,
     })
   } catch (error) {

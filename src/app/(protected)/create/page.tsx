@@ -212,7 +212,7 @@ export default function CreateProjectPage() {
         </h3>
         <ul className="space-y-1 text-sm text-blue-800">
           <li>• 1 credit is deducted per file indexed</li>
-          <li>• Click "Check Credits" to see how many credits this repo requires</li>
+          <li>• Click &quot;Check Credits&quot; to see how many credits this repo requires</li>
           <li>• Indexing happens automatically after project creation</li>
           <li>• You start with 10,000 free credits</li>
         </ul>

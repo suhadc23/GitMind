@@ -128,19 +128,35 @@ export function AskQuestionCard() {
                     Analyzing your codebase...
                   </div>
                 )}
-                <div className="prose max-w-none text-sm text-gray-900 break-words">
+                <div className="text-sm text-gray-900 break-words space-y-2">
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
+                      h1: ({ children }) => <h1 className="text-xl font-bold mt-4 mb-2 text-gray-900">{children}</h1>,
+                      h2: ({ children }) => <h2 className="text-lg font-semibold mt-4 mb-2 text-gray-900 border-b border-gray-200 pb-1">{children}</h2>,
+                      h3: ({ children }) => <h3 className="text-base font-semibold mt-3 mb-1 text-gray-900">{children}</h3>,
+                      p: ({ children }) => <p className="mb-3 leading-relaxed text-gray-800">{children}</p>,
+                      ul: ({ children }) => <ul className="list-disc pl-5 mb-3 space-y-1 text-gray-800">{children}</ul>,
+                      ol: ({ children }) => <ol className="list-decimal pl-5 mb-3 space-y-1 text-gray-800">{children}</ol>,
+                      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+                      strong: ({ children }) => <strong className="font-semibold text-gray-900">{children}</strong>,
+                      em: ({ children }) => <em className="italic text-gray-700">{children}</em>,
+                      blockquote: ({ children }) => (
+                        <blockquote className="border-l-4 border-emerald-400 pl-4 py-1 my-3 bg-emerald-50 rounded-r text-gray-600 italic">{children}</blockquote>
+                      ),
+                      hr: () => <hr className="my-4 border-gray-200" />,
+                      a: ({ href, children }) => (
+                        <a href={href} className="text-emerald-600 underline hover:text-emerald-800" target="_blank" rel="noopener noreferrer">{children}</a>
+                      ),
                       pre: (props) => (
-                        <pre className="overflow-x-auto bg-gray-900 rounded p-3 my-2 text-gray-100 text-xs whitespace-pre" {...props} />
+                        <pre className="overflow-x-auto bg-gray-900 rounded-lg p-4 my-3 text-gray-100 text-xs whitespace-pre" {...props} />
                       ),
                       code: ({ className, children, ...props }: any) => {
                         const isBlock = !!className?.startsWith('language-')
                         return isBlock ? (
                           <code className={className} {...props}>{children}</code>
                         ) : (
-                          <code className="bg-gray-100 text-gray-800 rounded px-1 text-xs" {...props}>{children}</code>
+                          <code className="bg-gray-100 text-emerald-700 rounded px-1.5 py-0.5 text-xs font-mono" {...props}>{children}</code>
                         )
                       },
                     }}

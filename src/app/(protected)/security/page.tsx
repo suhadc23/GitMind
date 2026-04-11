@@ -158,7 +158,7 @@ export default function SecurityPage() {
             <div className="text-center">
               <p className="font-semibold text-gray-700">No project selected</p>
               <p className="text-sm text-gray-500 mt-1">
-                Use the <span className="font-medium text-gray-700">"Scanning"</span> dropdown above to pick a project
+                Use the <span className="font-medium text-gray-700">&quot;Scanning&quot;</span> dropdown above to pick a project
               </p>
             </div>
           </CardContent>
@@ -176,7 +176,7 @@ export default function SecurityPage() {
             <div className="text-center">
               <p className="font-semibold text-gray-700">No scan run yet</p>
               <p className="text-sm text-gray-500 mt-1">
-                Click "Run Scan" to check your indexed files for security vulnerabilities
+                Click &quot;Run Scan&quot; to check your indexed files for security vulnerabilities
               </p>
             </div>
             <Button

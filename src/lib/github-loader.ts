@@ -1,7 +1,8 @@
 import { Document } from '@langchain/core/documents'
-import { summarizeCode } from './ai'
+import { summarizeCode, generateEmbedding } from './ai'
 import { db } from '@/server/db'
 import { Octokit } from 'octokit'
+import { Prisma } from '@prisma/client'
 
 // Parse GitHub URL to extract owner and repo
 export function parseGithubUrl(url: string): { owner: string; repo: string } {
@@ -81,12 +82,25 @@ export async function loadGithubRepo(
   console.log(`🌿 Using branch: ${branch}`)
 
   // 1 API call to get ALL file paths recursively
-  const { data: treeData } = await octokit.rest.git.getTree({
-    owner,
-    repo,
-    tree_sha: branch,
-    recursive: '1',
-  })
+  let treeData: Awaited<ReturnType<typeof octokit.rest.git.getTree>>['data']
+  try {
+    const response = await octokit.rest.git.getTree({
+      owner,
+      repo,
+      tree_sha: branch,
+      recursive: '1',
+    })
+    treeData = response.data
+  } catch (err: unknown) {
+    const status = (err as { status?: number }).status
+    if (status === 404) {
+      throw new Error(
+        `Repository not found: ${normalizedUrl}. ` +
+        'Check that the URL is correct and that your GitHub token has access to this repository.'
+      )
+    }
+    throw err
+  }
 
   // Filter to only fetchable source/text files
   const candidates = treeData.tree.filter((item) => {
@@ -452,6 +466,17 @@ export async function smartReIndexGithubRepo(
     summariseDocs(updateDocs),
   ])
 
+  // Generate embeddings for new + changed files
+  const allChanged = [...addSummaries, ...updateSummaries]
+  console.log(`🔢 Generating embeddings for ${allChanged.length} files...`)
+  const embeddingMap = new Map<string, number[]>()
+  await Promise.all(
+    allChanged.map(async (s) => {
+      const vec = await generateEmbedding(s.summary + ' ' + s.fileName)
+      if (vec.length > 0) embeddingMap.set(s.fileName, vec)
+    })
+  )
+
   // Helper: get SHA from Document metadata
   function shaFor(summary: { fileName: string }) {
     const match = [...toAdd, ...toUpdate].find((c) => c.path === summary.fileName)
@@ -474,6 +499,7 @@ export async function smartReIndexGithubRepo(
         summary: s.summary,
         sourceCode: s.sourceCode,
         fileSha: shaFor(s),
+        embedding: embeddingMap.get(s.fileName) ?? undefined,
       })),
     })
     console.log(`✅ Added ${addSummaries.length} new files`)
@@ -488,11 +514,33 @@ export async function smartReIndexGithubRepo(
         summary: s.summary,
         sourceCode: s.sourceCode,
         fileSha: shaFor(s),
+        embedding: embeddingMap.get(s.fileName) ?? undefined,
       },
     })
   }
   if (updateSummaries.length > 0) {
     console.log(`✏️  Updated ${updateSummaries.length} changed files`)
+  }
+
+  // Backfill embeddings for unchanged files that were indexed before vectors were added
+  const missingEmbeddings = await db.sourceCodeEmbedding.findMany({
+    where: { projectId, embedding: { equals: Prisma.DbNull } },
+    select: { id: true, fileName: true, summary: true },
+  })
+  if (missingEmbeddings.length > 0) {
+    console.log(`🔢 Backfilling embeddings for ${missingEmbeddings.length} existing files...`)
+    await Promise.all(
+      missingEmbeddings.map(async (row) => {
+        const vec = await generateEmbedding(row.summary + ' ' + row.fileName)
+        if (vec.length > 0) {
+          await db.sourceCodeEmbedding.update({
+            where: { id: row.id },
+            data: { embedding: vec },
+          })
+        }
+      })
+    )
+    console.log(`✅ Embeddings backfilled`)
   }
 
   return {
@@ -534,15 +582,22 @@ export async function indexGithubRepo(
     throw new Error('Failed to generate any summaries')
   }
 
-  // Step 3: Batch insert into DB — one query instead of N
+  // Step 3: Generate embeddings for all files in parallel
+  console.log(`🔢 Generating embeddings for ${summaries.length} files...`)
+  const embeddingVectors = await Promise.all(
+    summaries.map((s) => generateEmbedding(s.summary + ' ' + s.fileName))
+  )
+
+  // Step 4: Batch insert into DB — one query instead of N
   console.log(`💾 Storing ${summaries.length} files in database...`)
 
   await db.sourceCodeEmbedding.createMany({
-    data: summaries.map((item) => ({
+    data: summaries.map((item, i) => ({
       summary: item.summary,
       sourceCode: item.sourceCode,
       fileName: item.fileName,
       projectId,
+      embedding: embeddingVectors[i].length > 0 ? embeddingVectors[i] : undefined,
     })),
   })
 
