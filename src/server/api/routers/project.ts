@@ -1,10 +1,10 @@
 import { z } from 'zod'
 import { createTRPCRouter, protectedProcedure } from '../trpc'
-import { indexGithubRepo } from '@/lib/github-loader'
-import { checkCredits } from '@/lib/github-loader'
+import { indexGithubRepo, checkCredits, smartReIndexGithubRepo } from '@/lib/github-loader'
 import { TRPCError } from '@trpc/server'
 import { analyzeFile, computeCleanlinessScore, computeOrganizationScore } from '@/lib/code-analyzer'
-import { analyzeCodeQuality } from '@/lib/ai'
+import { analyzeCodeQuality, analyzeSecurityFindings } from '@/lib/ai'
+import { analyzeFileSecurity, computeSecuritySummary } from '@/lib/security-analyzer'
 
 export const projectRouter = createTRPCRouter({
   createProject: protectedProcedure
@@ -40,7 +40,14 @@ export const projectRouter = createTRPCRouter({
         },
       })
 
-      await indexGithubRepo(project.id, githubUrl, input.githubToken)
+      try {
+        await indexGithubRepo(project.id, githubUrl, input.githubToken)
+      } catch (err: unknown) {
+        // Clean up the project record so the user can try again
+        await ctx.db.project.delete({ where: { id: project.id } })
+        const message = err instanceof Error ? err.message : 'Failed to index repository'
+        throw new TRPCError({ code: 'BAD_REQUEST', message })
+      }
 
       await ctx.db.user.update({
         where: { id: ctx.userId },
@@ -294,6 +301,22 @@ export const projectRouter = createTRPCRouter({
       return project
     }),
 
+  reIndexProject: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await ctx.db.project.findFirst({
+        where: {
+          id: input.projectId,
+          userToProjects: { some: { userId: ctx.userId } },
+          deletedAt: null,
+        },
+        select: { id: true, githubUrl: true },
+      })
+      if (!project) throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' })
+
+      return smartReIndexGithubRepo(project.id, project.githubUrl)
+    }),
+
   joinProject: protectedProcedure
     .input(z.object({ projectId: z.string() }))
     .mutation(async ({ ctx, input }) => {
@@ -441,6 +464,100 @@ export const projectRouter = createTRPCRouter({
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
           message: 'Analysis failed. Please try again.',
+        })
+      }
+    }),
+
+  getSecurityReport: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .query(async ({ ctx, input }) => {
+      return ctx.db.securityScanReport.findUnique({
+        where: { projectId: input.projectId },
+      })
+    }),
+
+  runSecurityScan: protectedProcedure
+    .input(z.object({ projectId: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const project = await ctx.db.project.findFirst({
+        where: {
+          id: input.projectId,
+          userToProjects: { some: { userId: ctx.userId } },
+          deletedAt: null,
+        },
+      })
+      if (!project) throw new TRPCError({ code: 'NOT_FOUND', message: 'Project not found' })
+
+      const embeddings = await ctx.db.sourceCodeEmbedding.findMany({
+        where: { projectId: input.projectId },
+      })
+
+      if (embeddings.length === 0) {
+        throw new TRPCError({
+          code: 'BAD_REQUEST',
+          message: 'No indexed files found. Please index the repository first.',
+        })
+      }
+
+      await ctx.db.securityScanReport.upsert({
+        where: { projectId: input.projectId },
+        create: {
+          projectId: input.projectId,
+          overallScore: 0,
+          criticalCount: 0,
+          highCount: 0,
+          mediumCount: 0,
+          totalIssues: 0,
+          totalFilesScanned: embeddings.length,
+          topFindings: [],
+          aiInsights: '',
+          status: 'PROCESSING',
+        },
+        update: { status: 'PROCESSING' },
+      })
+
+      try {
+        const fileResults = embeddings.map((e) =>
+          analyzeFileSecurity(e.fileName, e.sourceCode)
+        )
+
+        const summary = computeSecuritySummary(fileResults)
+
+        const findingsSummary = summary.topFindings.map(
+          (f) => `[${f.severity.toUpperCase()}] ${f.category} in ${f.fileName}: ${f.description}`
+        )
+        const sampleSnippets = summary.topFindings
+          .filter((f) => f.severity === 'critical' || f.severity === 'high')
+          .slice(0, 10)
+          .map((f) => `// ${f.fileName}\n${f.snippet}`)
+
+        const aiResult =
+          summary.totalIssues > 0
+            ? await analyzeSecurityFindings(findingsSummary, sampleSnippets)
+            : { insights: 'No security issues detected. The codebase looks clean based on static analysis.' }
+
+        return ctx.db.securityScanReport.update({
+          where: { projectId: input.projectId },
+          data: {
+            overallScore: summary.overallScore,
+            criticalCount: summary.criticalCount,
+            highCount: summary.highCount,
+            mediumCount: summary.mediumCount,
+            totalIssues: summary.totalIssues,
+            totalFilesScanned: fileResults.length,
+            topFindings: summary.topFindings as unknown as import('@prisma/client').Prisma.InputJsonValue,
+            aiInsights: aiResult.insights,
+            status: 'COMPLETED',
+          },
+        })
+      } catch (error) {
+        await ctx.db.securityScanReport.update({
+          where: { projectId: input.projectId },
+          data: { status: 'FAILED' },
+        })
+        throw new TRPCError({
+          code: 'INTERNAL_SERVER_ERROR',
+          message: 'Security scan failed. Please try again.',
         })
       }
     }),
